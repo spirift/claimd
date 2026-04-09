@@ -16,6 +16,10 @@ pub struct Cli {
     /// Path to the todo store directory
     #[arg(long, global = true, env = "AI_TODO_DIR")]
     pub dir: Option<PathBuf>,
+
+    /// Project name (isolates tasks per project)
+    #[arg(long, global = true, env = "AI_TODO_PROJECT")]
+    pub project: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -170,4 +174,7 @@ pub enum Command {
         /// UUID or prefix
         id: String,
     },
+
+    /// List all projects
+    Projects,
 }

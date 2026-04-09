@@ -46,6 +46,33 @@ Data is stored in `~/.ai-todo/` by default:
 
 Override the store location with `--dir /path` or the `AI_TODO_DIR` environment variable.
 
+## Projects
+
+Use `--project <name>` (or `AI_TODO_PROJECT` env var) to isolate tasks per project. Each project gets its own store directory under `~/.ai-todo/projects/<name>/` with no cross-pollution between projects.
+
+```bash
+# Initialize separate projects
+ai-todo --project backend init
+ai-todo --project frontend init
+
+# Tasks are completely isolated
+ai-todo --project backend add "Design API schema"
+ai-todo --project frontend add "Build login page"
+
+# Each project only sees its own tasks
+ai-todo --project backend list    # only backend tasks
+ai-todo --project frontend list   # only frontend tasks
+
+# List all projects
+ai-todo projects
+
+# Use env var for convenience
+export AI_TODO_PROJECT=backend
+ai-todo list   # shows backend tasks
+```
+
+Without `--project`, the default store at `~/.ai-todo/` is used (backward compatible).
+
 ## Global options
 
 These flags can be used with any command:
@@ -54,6 +81,7 @@ These flags can be used with any command:
 |------|-------------|
 | `--json` | Output as JSON instead of human-readable text |
 | `--dir <DIR>` | Path to the todo store directory (env: `AI_TODO_DIR`) |
+| `--project <NAME>` | Project name for task isolation (env: `AI_TODO_PROJECT`) |
 | `-h, --help` | Print help |
 
 ## Exit codes
@@ -321,6 +349,22 @@ Example:
 
 ```bash
 ai-todo remove 6d45
+```
+
+### `projects`
+
+List all known projects and their store paths.
+
+```bash
+ai-todo projects
+```
+
+Example output:
+
+```
+(default)  /Users/me/.ai-todo
+backend    /Users/me/.ai-todo/projects/backend
+frontend   /Users/me/.ai-todo/projects/frontend
 ```
 
 ## Dependencies

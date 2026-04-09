@@ -22,7 +22,11 @@ fn dirs_next() -> Option<PathBuf> {
 
 fn main() {
     let cli = Cli::parse();
-    let dir = cli.dir.clone().unwrap_or_else(default_dir);
+    let base_dir = cli.dir.clone().unwrap_or_else(default_dir);
+    let dir = match &cli.project {
+        Some(name) => base_dir.join("projects").join(name),
+        None => base_dir,
+    };
     let store = Store::new(dir);
     let json = cli.json;
 
@@ -95,6 +99,43 @@ fn run(cli: Cli, store: &Store) -> error::Result<()> {
         Command::Remove { id } => {
             let item = commands::remove(store, &id)?;
             output::print_message(&format!("Removed: {} ({})", item.title, item.short_id()), json);
+        }
+        Command::Projects => {
+            let base_dir = cli.dir.unwrap_or_else(default_dir);
+            let projects_dir = base_dir.join("projects");
+            let mut names = Vec::new();
+            if projects_dir.is_dir() {
+                if let Ok(entries) = std::fs::read_dir(&projects_dir) {
+                    for entry in entries.flatten() {
+                        if entry.path().is_dir() {
+                            if let Some(name) = entry.file_name().to_str() {
+                                names.push(name.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+            // Also check if there's a default (non-project) store
+            let has_default = base_dir.join("todo.json").exists();
+            names.sort();
+            if json {
+                let val = serde_json::json!({
+                    "default_store": has_default,
+                    "projects": names,
+                });
+                println!("{}", serde_json::to_string_pretty(&val).unwrap());
+            } else {
+                if has_default {
+                    println!("(default)  {}", base_dir.display());
+                }
+                if names.is_empty() && !has_default {
+                    println!("No projects found.");
+                } else {
+                    for name in &names {
+                        println!("{}  {}", name, projects_dir.join(name).display());
+                    }
+                }
+            }
         }
     }
     Ok(())
