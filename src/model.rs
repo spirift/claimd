@@ -117,3 +117,17 @@ impl TodoItem {
 pub struct TodoList {
     pub items: Vec<TodoItem>,
 }
+
+fn default_active() -> bool { true }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectMeta {
+    #[serde(default = "default_active")]
+    pub active: bool,
+}
+
+impl Default for ProjectMeta {
+    fn default() -> Self {
+        ProjectMeta { active: true }
+    }
+}

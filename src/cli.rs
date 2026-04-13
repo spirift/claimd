@@ -3,8 +3,29 @@ use std::path::PathBuf;
 
 use crate::model::Status;
 
+#[derive(Subcommand)]
+pub enum ProjectCommand {
+    /// List all projects and their active status
+    List,
+    /// Show active status of a project
+    Status {
+        /// Project name
+        name: String,
+    },
+    /// Activate a project (allow claiming tasks)
+    Activate {
+        /// Project name
+        name: String,
+    },
+    /// Deactivate a project (block new claims)
+    Deactivate {
+        /// Project name
+        name: String,
+    },
+}
+
 #[derive(Parser)]
-#[command(name = "ai-todo", about = "Todo list for multi-agent AI collaboration")]
+#[command(name = "ai-todo", about = "Todo list for multi-agent AI collaboration", long_about = "Concurrent todo list CLI for multi-agent AI workflows.\n\nAgents can add, view, claim, and complete tasks with atomic file locking that prevents two agents picking up the same work. Tasks are scoped per project; inactive projects block new claims while keeping existing work visible and completable.")]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
@@ -73,7 +94,7 @@ pub enum Command {
         id: String,
     },
 
-    /// Atomically claim a todo (New/Incomplete/PrChangesRequested → InProgress)
+    /// Atomically claim a todo (New/Incomplete/PrChangesRequested → InProgress). Blocked if the project is inactive.
     Claim {
         /// UUID or prefix
         id: String,
@@ -82,7 +103,7 @@ pub enum Command {
         agent: Option<String>,
     },
 
-    /// Atomically claim multiple todos (all-or-nothing)
+    /// Atomically claim multiple todos (all-or-nothing). Blocked if the project is inactive.
     ClaimMulti {
         /// UUIDs or prefixes
         ids: Vec<String>,
@@ -175,6 +196,9 @@ pub enum Command {
         id: String,
     },
 
-    /// List all projects
-    Projects,
+    /// Manage projects
+    Project {
+        #[command(subcommand)]
+        command: ProjectCommand,
+    },
 }

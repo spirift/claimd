@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use fs2::FileExt;
 
 use crate::error::{Error, Result};
-use crate::model::TodoList;
+use crate::model::{ProjectMeta, TodoList};
 
 pub struct Store {
     dir: PathBuf,
@@ -25,6 +25,10 @@ impl Store {
 
     fn tmp_path(&self) -> PathBuf {
         self.dir.join("todo.json.tmp")
+    }
+
+    fn project_meta_path(&self) -> PathBuf {
+        self.dir.join("project.json")
     }
 
     pub fn init(&self) -> Result<()> {
@@ -116,5 +120,24 @@ impl Store {
         let list = self.read_data()?;
         let result = f(&list)?;
         Ok(result)
+    }
+
+    /// Read project metadata. Returns default (active=true) if project.json doesn't exist.
+    pub fn read_project_meta(&self) -> Result<ProjectMeta> {
+        let path = self.project_meta_path();
+        if !path.exists() {
+            return Ok(ProjectMeta::default());
+        }
+        let bytes = fs::read(&path)?;
+        let meta: ProjectMeta = serde_json::from_slice(&bytes)?;
+        Ok(meta)
+    }
+
+    /// Write project metadata. Requires the store to be initialized first.
+    pub fn write_project_meta(&self, meta: &ProjectMeta) -> Result<()> {
+        self.ensure_initialized()?;
+        let bytes = serde_json::to_vec_pretty(meta)?;
+        fs::write(self.project_meta_path(), &bytes)?;
+        Ok(())
     }
 }

@@ -2,7 +2,7 @@ use chrono::Utc;
 use uuid::Uuid;
 
 use crate::error::{Error, Result};
-use crate::model::{Status, TodoItem, TodoList};
+use crate::model::{ProjectMeta, Status, TodoItem, TodoList};
 use crate::store::Store;
 
 /// Find item by UUID prefix (minimum 4 chars). Returns mutable reference.
@@ -153,10 +153,14 @@ fn rotate_claimed_by(item: &mut TodoItem, new_agent: Option<&str>) {
 }
 
 pub fn claim(store: &Store, id_prefix: &str, agent: Option<&str>) -> Result<TodoItem> {
+    let meta = store.read_project_meta()?;
     store.with_try_lock(|list| {
         let item = find_by_prefix_mut(&mut list.items, id_prefix)?;
         match item.status {
             Status::New | Status::Incomplete => {
+                if !meta.active {
+                    return Err(Error::ProjectInactive);
+                }
                 if item.has_pending_deps() {
                     return Err(Error::HasPendingDeps {
                         id: item.id,
@@ -169,6 +173,9 @@ pub fn claim(store: &Store, id_prefix: &str, agent: Option<&str>) -> Result<Todo
                 Ok(item.clone())
             }
             Status::PrChangesRequested => {
+                if !meta.active {
+                    return Err(Error::ProjectInactive);
+                }
                 item.status = Status::InProgress;
                 rotate_claimed_by(item, agent);
                 item.updated_at = Utc::now();
@@ -188,6 +195,7 @@ pub fn claim(store: &Store, id_prefix: &str, agent: Option<&str>) -> Result<Todo
 }
 
 pub fn claim_multi(store: &Store, id_prefixes: &[String], agent: Option<&str>) -> Result<Vec<TodoItem>> {
+    let meta = store.read_project_meta()?;
     store.with_try_lock(|list| {
         // First pass: validate all items are claimable
         let indices: Vec<usize> = id_prefixes
@@ -199,6 +207,9 @@ pub fn claim_multi(store: &Store, id_prefixes: &[String], agent: Option<&str>) -
             let item = &list.items[idx];
             match item.status {
                 Status::New | Status::Incomplete => {
+                    if !meta.active {
+                        return Err(Error::ProjectInactive);
+                    }
                     if item.has_pending_deps() {
                         return Err(Error::HasPendingDeps {
                             id: item.id,
@@ -206,7 +217,11 @@ pub fn claim_multi(store: &Store, id_prefixes: &[String], agent: Option<&str>) -
                         });
                     }
                 }
-                Status::PrChangesRequested => {}
+                Status::PrChangesRequested => {
+                    if !meta.active {
+                        return Err(Error::ProjectInactive);
+                    }
+                }
                 Status::InProgress => {
                     return Err(Error::AlreadyClaimed {
                         id: item.id,
@@ -383,4 +398,15 @@ pub fn remove(store: &Store, id_prefix: &str) -> Result<TodoItem> {
         let item = list.items.remove(idx);
         Ok(item)
     })
+}
+
+pub fn project_get_meta(store: &Store) -> Result<ProjectMeta> {
+    store.read_project_meta()
+}
+
+pub fn project_set_active(store: &Store, active: bool) -> Result<ProjectMeta> {
+    let mut meta = store.read_project_meta()?;
+    meta.active = active;
+    store.write_project_meta(&meta)?;
+    Ok(meta)
 }

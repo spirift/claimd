@@ -1,11 +1,30 @@
 use crate::error::Error;
-use crate::model::{Status, TodoItem};
+use crate::model::{ProjectMeta, Status, TodoItem};
 
-pub fn print_item(item: &TodoItem, json: bool) {
+pub struct OutputContext {
+    pub project_active: bool,
+}
+
+impl OutputContext {
+    pub fn from_meta(meta: &ProjectMeta) -> Self {
+        OutputContext { project_active: meta.active }
+    }
+}
+
+fn inject_project_active(item: &TodoItem, ctx: &OutputContext) -> serde_json::Value {
+    let mut val = serde_json::to_value(item).unwrap();
+    if let serde_json::Value::Object(ref mut map) = val {
+        map.insert("project_active".to_string(), serde_json::Value::Bool(ctx.project_active));
+    }
+    val
+}
+
+pub fn print_item(item: &TodoItem, ctx: &OutputContext, json: bool) {
     if json {
-        println!("{}", serde_json::to_string(item).unwrap());
+        println!("{}", inject_project_active(item, ctx));
     } else {
-        println!("{:<10} {:<12} P{:<3} {}", item.short_id(), item.status, item.priority, item.title);
+        let inactive_marker = if ctx.project_active { "" } else { " [INACTIVE PROJECT]" };
+        println!("{:<10} {:<12} P{:<3} {}{}", item.short_id(), item.status, item.priority, item.title, inactive_marker);
         if let Some(desc) = &item.description {
             println!("           {desc}");
         }
@@ -37,14 +56,16 @@ pub fn print_item(item: &TodoItem, json: bool) {
     }
 }
 
-pub fn print_item_detail(item: &TodoItem, json: bool) {
+pub fn print_item_detail(item: &TodoItem, ctx: &OutputContext, json: bool) {
     if json {
-        println!("{}", serde_json::to_string_pretty(item).unwrap());
+        let val = inject_project_active(item, ctx);
+        println!("{}", serde_json::to_string_pretty(&val).unwrap());
     } else {
         println!("ID:          {}", item.id);
         println!("Title:       {}", item.title);
         println!("Status:      {}", item.status);
         println!("Priority:    {}", item.priority);
+        println!("Project:     {}", if ctx.project_active { "active" } else { "INACTIVE" });
         if let Some(desc) = &item.description {
             println!("Description: {desc}");
         }
@@ -82,14 +103,17 @@ pub fn print_item_detail(item: &TodoItem, json: bool) {
     }
 }
 
-pub fn print_items(items: &[&TodoItem], json: bool) {
+pub fn print_items(items: &[&TodoItem], ctx: &OutputContext, json: bool) {
     if json {
-        let serialized = serde_json::to_string(items).unwrap();
-        println!("{serialized}");
+        let vals: Vec<serde_json::Value> = items.iter().map(|item| inject_project_active(item, ctx)).collect();
+        println!("{}", serde_json::to_string(&vals).unwrap());
     } else {
         if items.is_empty() {
             println!("No todos found.");
             return;
+        }
+        if !ctx.project_active {
+            println!("! Project is inactive — new claims are disabled");
         }
         for (i, item) in items.iter().enumerate() {
             let claimed = match &item.claimed_by {

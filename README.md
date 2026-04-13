@@ -7,7 +7,8 @@ A concurrent todo list CLI built in Rust for multi-agent AI collaboration. Agent
 - **Atomic claiming** -- when two agents race to claim the same todo, exactly one wins; the other gets an immediate error (exit code 2)
 - **Manager support** -- `claim-multi` claims multiple items in a single atomic operation with all-or-nothing semantics
 - **Statuses** -- New, InProgress, PrOpen, PrChangesRequested, Done, Incomplete with transition validation
-- **JSON mode** -- `--json` flag on any command for machine-parseable output
+- **Project active/inactive** -- mark a project inactive to block new claims while keeping all tasks visible and existing in-progress work completable
+- **JSON mode** -- `--json` flag on any command for machine-parseable output; every task includes a `project_active` field
 - **UUID prefix matching** -- reference any item by the first 4+ characters of its ID
 - **Dependencies** -- declare dependencies between todos; a task with pending deps cannot be claimed until all deps are done
 - **Minimal footprint** -- ~764KB release binary, 6 dependencies, no async runtime or database
@@ -63,15 +64,32 @@ ai-todo --project frontend add "Build login page"
 ai-todo --project backend list    # only backend tasks
 ai-todo --project frontend list   # only frontend tasks
 
-# List all projects
-ai-todo projects
-
 # Use env var for convenience
 export AI_TODO_PROJECT=backend
 ai-todo list   # shows backend tasks
 ```
 
-Without `--project`, the default store at `~/.ai-todo/` is used (backward compatible).
+Without `--project`, the default store at `~/.ai-todo/` is used (always active, no `project.json`).
+
+### Project active/inactive state
+
+Projects have an `active` flag (default: `true`). When a project is **inactive**, all `→ InProgress` transitions are blocked — `claim` and `claim-multi` fail immediately with exit code 2. Existing in-progress tasks are unaffected and can still be progressed to `pr_open`, `done`, `incomplete`, etc. This is designed for spinning down a project: block new work starting while letting active agents finish up cleanly.
+
+Every task output (JSON and human-readable) includes the project's active state so agents always know the current mode without a separate lookup.
+
+```bash
+# Deactivate a project — blocks new claims
+ai-todo project deactivate backend
+
+# Reactivate when ready
+ai-todo project activate backend
+
+# Check state of a single project
+ai-todo project status backend
+
+# List all projects with their active state
+ai-todo project list
+```
 
 ## Global options
 
@@ -90,7 +108,7 @@ These flags can be used with any command:
 |------|---------|
 | `0` | Success |
 | `1` | General error (not found, invalid args, IO) |
-| `2` | Claim conflict (already claimed, lock held, or unresolved dependencies) |
+| `2` | Claim conflict (already claimed, lock held, unresolved dependencies, or project inactive) |
 
 ## Commands
 
@@ -172,7 +190,7 @@ ai-todo show 6d45
 
 ### `claim`
 
-Atomically claim a todo, transitioning it from `New`, `Incomplete`, or `PrChangesRequested` to `InProgress`. Uses a non-blocking lock -- if another process holds the lock, fails immediately with exit code 2. Also fails with exit code 2 if the todo has unresolved dependencies.
+Atomically claim a todo, transitioning it from `New`, `Incomplete`, or `PrChangesRequested` to `InProgress`. Uses a non-blocking lock -- if another process holds the lock, fails immediately with exit code 2. Also fails with exit code 2 if the todo has unresolved dependencies or if the project is inactive.
 
 When claiming a `PrChangesRequested` item, the previous `claimed_by` agent is moved to the `previously_claimed_by` list, and the new agent takes over.
 
@@ -191,6 +209,7 @@ ai-todo claim 6d45 --agent "agent-1"
 ai-todo claim 6d45 --agent "agent-2"   # fails if already claimed (InProgress)
 ai-todo claim c022 --agent "agent-1"   # fails if has pending dependencies
 ai-todo claim 6d45 --agent "agent-2"   # succeeds if PrChangesRequested, agent-1 → previously_claimed_by
+ai-todo claim 6d45 --agent "agent-1"   # fails with exit code 2 if project is inactive
 ```
 
 ### `claim-multi`
@@ -351,20 +370,65 @@ Example:
 ai-todo remove 6d45
 ```
 
-### `projects`
+### `project list`
 
-List all known projects and their store paths.
+List all known projects, their active state, and store paths.
 
 ```bash
-ai-todo projects
+ai-todo project list
 ```
 
 Example output:
 
 ```
-(default)  /Users/me/.ai-todo
-backend    /Users/me/.ai-todo/projects/backend
-frontend   /Users/me/.ai-todo/projects/frontend
+(default)             active   /Users/me/.ai-todo
+backend               active   /Users/me/.ai-todo/projects/backend
+frontend              INACTIVE /Users/me/.ai-todo/projects/frontend
+```
+
+### `project status`
+
+Show the active state of a specific project.
+
+```bash
+ai-todo project status <NAME>
+```
+
+Example:
+
+```bash
+ai-todo project status backend
+# backend: active
+```
+
+### `project activate`
+
+Activate a project, re-enabling `claim` and `claim-multi`.
+
+```bash
+ai-todo project activate <NAME>
+```
+
+Example:
+
+```bash
+ai-todo project activate backend
+# backend: active
+```
+
+### `project deactivate`
+
+Deactivate a project, blocking all `→ InProgress` transitions. Existing in-progress tasks are unaffected.
+
+```bash
+ai-todo project deactivate <NAME>
+```
+
+Example:
+
+```bash
+ai-todo project deactivate frontend
+# frontend: INACTIVE
 ```
 
 ## Dependencies
@@ -408,18 +472,30 @@ Writes use an atomic rename pattern (write to `todo.json.tmp`, then rename over 
 
 ## JSON output
 
-Pass `--json` to any command for machine-parseable output:
+Pass `--json` to any command for machine-parseable output. Every task object includes a `project_active` field so agents can inspect the project state without a separate command.
 
 ```bash
-# List as JSON array
+# List as JSON array — each item includes project_active
 ai-todo list --json
+# [{"id":"...","title":"...","status":"new","project_active":true,...}]
 
 # Single item as JSON object
 ai-todo show 6d45 --json
 
+# Project commands as JSON
+ai-todo project list --json
+# {"default_store":true,"projects":[{"name":"backend","active":true},{"name":"frontend","active":false}]}
+
+ai-todo project status backend --json
+# {"name":"backend","active":true}
+
 # Errors as JSON to stderr
 ai-todo claim 6d45 --json
 # {"error":"Todo 6d45a75a is already being worked on by 'agent-1'","code":"already_claimed"}
+
+# Project inactive error
+ai-todo --project frontend claim 6d45 --json
+# {"error":"Project is inactive — claiming is disabled","code":"project_inactive"}
 ```
 
 ## Data model
@@ -444,3 +520,4 @@ Each todo item has the following fields:
 | `tags` | string[] | List of tags |
 | `depends_on` | UUID[] | IDs of todos that must be completed before this one can be claimed |
 | `depends_on_completed` | UUID[] | IDs of dependencies that have been completed |
+| `project_active` | bool | Whether the owning project currently allows claiming (injected at output time, not stored on the item) |

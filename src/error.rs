@@ -14,12 +14,13 @@ pub enum Error {
     InvalidTransition { id: Uuid, from: Status, to: Status },
     HasPendingDeps { id: Uuid, pending: Vec<Uuid> },
     StoreNotInitialized,
+    ProjectInactive,
 }
 
 impl Error {
     pub fn exit_code(&self) -> i32 {
         match self {
-            Error::AlreadyClaimed { .. } | Error::AlreadyLocked | Error::HasPendingDeps { .. } => 2,
+            Error::AlreadyClaimed { .. } | Error::AlreadyLocked | Error::HasPendingDeps { .. } | Error::ProjectInactive => 2,
             _ => 1,
         }
     }
@@ -35,6 +36,7 @@ impl Error {
             Error::InvalidTransition { .. } => "invalid_transition",
             Error::HasPendingDeps { .. } => "has_pending_deps",
             Error::StoreNotInitialized => "not_initialized",
+            Error::ProjectInactive => "project_inactive",
         }
     }
 }
@@ -71,6 +73,7 @@ impl fmt::Display for Error {
                 write!(f, "Todo {short} has unresolved dependencies: {}", deps.join(", "))
             }
             Error::StoreNotInitialized => write!(f, "Store not initialized. Run 'ai-todo init' first."),
+            Error::ProjectInactive => write!(f, "Project is inactive — claiming is disabled"),
         }
     }
 }
