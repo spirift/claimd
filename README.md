@@ -297,7 +297,7 @@ ai-todo incomplete 6d45 --reason "blocked on design review"
 
 ### `unclaim`
 
-Release a claim, transitioning from `InProgress` back to `New`. Clears the `claimed_by` field.
+Reset a todo to `New`, transitioning from `InProgress` or `Incomplete`. Clears the `claimed_by` field.
 
 ```bash
 ai-todo unclaim <ID>

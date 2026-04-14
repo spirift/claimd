@@ -328,17 +328,19 @@ pub fn incomplete(store: &Store, id_prefix: &str, reason: Option<&str>) -> Resul
 pub fn unclaim(store: &Store, id_prefix: &str) -> Result<TodoItem> {
     store.with_lock(|list| {
         let item = find_by_prefix_mut(&mut list.items, id_prefix)?;
-        if item.status != Status::InProgress {
-            return Err(Error::InvalidTransition {
+        match item.status {
+            Status::InProgress | Status::Incomplete => {
+                item.status = Status::New;
+                item.claimed_by = None;
+                item.updated_at = Utc::now();
+                Ok(item.clone())
+            }
+            _ => Err(Error::InvalidTransition {
                 id: item.id,
                 from: item.status.clone(),
                 to: Status::New,
-            });
+            }),
         }
-        item.status = Status::New;
-        item.claimed_by = None;
-        item.updated_at = Utc::now();
-        Ok(item.clone())
     })
 }
 

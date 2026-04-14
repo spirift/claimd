@@ -142,7 +142,7 @@ pub enum Command {
         reason: Option<String>,
     },
 
-    /// Release a claim (InProgress → New)
+    /// Release a claim and reset to New (InProgress or Incomplete → New)
     Unclaim {
         /// UUID or prefix
         id: String,
