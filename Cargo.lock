@@ -3,18 +3,6 @@
 version = 4
 
 [[package]]
-name = "ai-todo"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "clap",
- "fs2",
- "serde",
- "serde_json",
- "uuid",
-]
-
-[[package]]
 name = "android_system_properties"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -134,6 +122,18 @@ dependencies = [
  "num-traits",
  "serde",
  "windows-link",
+]
+
+[[package]]
+name = "claimd"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "clap",
+ "fs2",
+ "serde",
+ "serde_json",
+ "uuid",
 ]
 
 [[package]]

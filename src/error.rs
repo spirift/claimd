@@ -72,7 +72,7 @@ impl fmt::Display for Error {
                 let deps: Vec<String> = pending.iter().map(|u| u.to_string()[..8].to_string()).collect();
                 write!(f, "Todo {short} has unresolved dependencies: {}", deps.join(", "))
             }
-            Error::StoreNotInitialized => write!(f, "Store not initialized. Run 'ai-todo init' first."),
+            Error::StoreNotInitialized => write!(f, "Store not initialized. Run 'claimd init' first."),
             Error::ProjectInactive => write!(f, "Project is inactive — claiming is disabled"),
         }
     }

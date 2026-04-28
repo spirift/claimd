@@ -1,4 +1,4 @@
-# ai-todo
+# claimd
 
 A concurrent todo list CLI built in Rust for multi-agent AI collaboration. Agents can add, view, claim, and complete tasks with atomic locking that prevents two agents from picking up the same work.
 
@@ -23,53 +23,53 @@ Or build manually:
 
 ```bash
 cargo build --release
-# Binary at ./target/release/ai-todo
+# Binary at ./target/release/claimd
 ```
 
 ## Quick start
 
 ```bash
-ai-todo init
-ai-todo add "Set up database schema" --priority 0 --tag backend
-ai-todo add "Implement auth" --desc "OAuth2 flow" --priority 1
-ai-todo list
-ai-todo claim 6d45 --agent "agent-1"
-ai-todo done 6d45
+claimd init
+claimd add "Set up database schema" --priority 0 --tag backend
+claimd add "Implement auth" --desc "OAuth2 flow" --priority 1
+claimd list
+claimd claim 6d45 --agent "agent-1"
+claimd done 6d45
 ```
 
 ## Storage
 
-Data is stored in `~/.ai-todo/` by default:
+Data is stored in `~/.claimd/` by default:
 
 - `todo.json` -- canonical data file
 - `todo.lock` -- flock target for atomic operations
 - `todo.json.tmp` -- transient write target (atomic rename)
 
-Override the store location with `--dir /path` or the `AI_TODO_DIR` environment variable.
+Override the store location with `--dir /path` or the `CLAIMD_DIR` environment variable.
 
 ## Projects
 
-Use `--project <name>` (or `AI_TODO_PROJECT` env var) to isolate tasks per project. Each project gets its own store directory under `~/.ai-todo/projects/<name>/` with no cross-pollution between projects.
+Use `--project <name>` (or `CLAIMD_PROJECT` env var) to isolate tasks per project. Each project gets its own store directory under `~/.claimd/projects/<name>/` with no cross-pollution between projects.
 
 ```bash
 # Initialize separate projects
-ai-todo --project backend init
-ai-todo --project frontend init
+claimd --project backend init
+claimd --project frontend init
 
 # Tasks are completely isolated
-ai-todo --project backend add "Design API schema"
-ai-todo --project frontend add "Build login page"
+claimd --project backend add "Design API schema"
+claimd --project frontend add "Build login page"
 
 # Each project only sees its own tasks
-ai-todo --project backend list    # only backend tasks
-ai-todo --project frontend list   # only frontend tasks
+claimd --project backend list    # only backend tasks
+claimd --project frontend list   # only frontend tasks
 
 # Use env var for convenience
-export AI_TODO_PROJECT=backend
-ai-todo list   # shows backend tasks
+export CLAIMD_PROJECT=backend
+claimd list   # shows backend tasks
 ```
 
-Without `--project`, the default store at `~/.ai-todo/` is used (always active, no `project.json`).
+Without `--project`, the default store at `~/.claimd/` is used (always active, no `project.json`).
 
 ### Project active/inactive state
 
@@ -79,16 +79,16 @@ Every task output (JSON and human-readable) includes the project's active state 
 
 ```bash
 # Deactivate a project — blocks new claims
-ai-todo project deactivate backend
+claimd project deactivate backend
 
 # Reactivate when ready
-ai-todo project activate backend
+claimd project activate backend
 
 # Check state of a single project
-ai-todo project status backend
+claimd project status backend
 
 # List all projects with their active state
-ai-todo project list
+claimd project list
 ```
 
 ## Global options
@@ -98,8 +98,8 @@ These flags can be used with any command:
 | Flag | Description |
 |------|-------------|
 | `--json` | Output as JSON instead of human-readable text |
-| `--dir <DIR>` | Path to the todo store directory (env: `AI_TODO_DIR`) |
-| `--project <NAME>` | Project name for task isolation (env: `AI_TODO_PROJECT`) |
+| `--dir <DIR>` | Path to the todo store directory (env: `CLAIMD_DIR`) |
+| `--project <NAME>` | Project name for task isolation (env: `CLAIMD_PROJECT`) |
 | `-h, --help` | Print help |
 
 ## Exit codes
@@ -117,7 +117,7 @@ These flags can be used with any command:
 Initialize the todo store. Creates the store directory and an empty `todo.json`. Idempotent.
 
 ```bash
-ai-todo init
+claimd init
 ```
 
 ### `add`
@@ -125,7 +125,7 @@ ai-todo init
 Add a new todo item with status `New`.
 
 ```bash
-ai-todo add <TITLE> [OPTIONS]
+claimd add <TITLE> [OPTIONS]
 ```
 
 | Option | Description |
@@ -141,10 +141,10 @@ ai-todo add <TITLE> [OPTIONS]
 Examples:
 
 ```bash
-ai-todo add "Fix login bug" --priority 0 --tag urgent --tag auth
-ai-todo add "Write docs" --desc "API reference for v2" --priority 3
-ai-todo add "Investigate crash" --link "https://jira.example.com/BUG-42" --source jira --author agent-alpha
-ai-todo add "Write integration tests" --depends-on 6d45 --depends-on f5b8
+claimd add "Fix login bug" --priority 0 --tag urgent --tag auth
+claimd add "Write docs" --desc "API reference for v2" --priority 3
+claimd add "Investigate crash" --link "https://jira.example.com/BUG-42" --source jira --author agent-alpha
+claimd add "Write integration tests" --depends-on 6d45 --depends-on f5b8
 ```
 
 ### `list`
@@ -152,7 +152,7 @@ ai-todo add "Write integration tests" --depends-on 6d45 --depends-on f5b8
 List todo items. By default shows `New` and `InProgress` items only.
 
 ```bash
-ai-todo list [OPTIONS]
+claimd list [OPTIONS]
 ```
 
 | Option | Description |
@@ -164,10 +164,10 @@ ai-todo list [OPTIONS]
 Examples:
 
 ```bash
-ai-todo list
-ai-todo list --status in_progress
-ai-todo list --tag backend --all
-ai-todo list --json
+claimd list
+claimd list --status in_progress
+claimd list --tag backend --all
+claimd list --json
 ```
 
 ### `show`
@@ -175,7 +175,7 @@ ai-todo list --json
 Show full detail of a single todo item.
 
 ```bash
-ai-todo show <ID>
+claimd show <ID>
 ```
 
 | Argument | Description |
@@ -185,7 +185,7 @@ ai-todo show <ID>
 Example:
 
 ```bash
-ai-todo show 6d45
+claimd show 6d45
 ```
 
 ### `claim`
@@ -195,7 +195,7 @@ Atomically claim a todo, transitioning it from `New`, `Incomplete`, or `PrChange
 When claiming a `PrChangesRequested` item, the previous `claimed_by` agent is moved to the `previously_claimed_by` list, and the new agent takes over.
 
 ```bash
-ai-todo claim <ID> [OPTIONS]
+claimd claim <ID> [OPTIONS]
 ```
 
 | Option | Description |
@@ -205,11 +205,11 @@ ai-todo claim <ID> [OPTIONS]
 Examples:
 
 ```bash
-ai-todo claim 6d45 --agent "agent-1"
-ai-todo claim 6d45 --agent "agent-2"   # fails if already claimed (InProgress)
-ai-todo claim c022 --agent "agent-1"   # fails if has pending dependencies
-ai-todo claim 6d45 --agent "agent-2"   # succeeds if PrChangesRequested, agent-1 → previously_claimed_by
-ai-todo claim 6d45 --agent "agent-1"   # fails with exit code 2 if project is inactive
+claimd claim 6d45 --agent "agent-1"
+claimd claim 6d45 --agent "agent-2"   # fails if already claimed (InProgress)
+claimd claim c022 --agent "agent-1"   # fails if has pending dependencies
+claimd claim 6d45 --agent "agent-2"   # succeeds if PrChangesRequested, agent-1 → previously_claimed_by
+claimd claim 6d45 --agent "agent-1"   # fails with exit code 2 if project is inactive
 ```
 
 ### `claim-multi`
@@ -217,7 +217,7 @@ ai-todo claim 6d45 --agent "agent-1"   # fails with exit code 2 if project is in
 Atomically claim multiple todos in a single operation. All-or-nothing: if any item is not claimable, none are claimed.
 
 ```bash
-ai-todo claim-multi [IDS]... [OPTIONS]
+claimd claim-multi [IDS]... [OPTIONS]
 ```
 
 | Option | Description |
@@ -227,7 +227,7 @@ ai-todo claim-multi [IDS]... [OPTIONS]
 Example:
 
 ```bash
-ai-todo claim-multi 6d45 f5b8 31c9 --agent "manager-1"
+claimd claim-multi 6d45 f5b8 31c9 --agent "manager-1"
 ```
 
 ### `pr-open`
@@ -235,7 +235,7 @@ ai-todo claim-multi 6d45 f5b8 31c9 --agent "manager-1"
 Mark a todo as having a PR open and record the PR URL. Valid from `InProgress` or `PrChangesRequested`.
 
 ```bash
-ai-todo pr-open <ID> --pr-url <URL>
+claimd pr-open <ID> --pr-url <URL>
 ```
 
 | Option | Description |
@@ -245,7 +245,7 @@ ai-todo pr-open <ID> --pr-url <URL>
 Example:
 
 ```bash
-ai-todo pr-open 6d45 --pr-url "https://github.com/org/repo/pull/42"
+claimd pr-open 6d45 --pr-url "https://github.com/org/repo/pull/42"
 ```
 
 ### `pr-changes-requested`
@@ -253,13 +253,13 @@ ai-todo pr-open 6d45 --pr-url "https://github.com/org/repo/pull/42"
 Mark a todo's PR as having changes requested. Valid from `PrOpen`.
 
 ```bash
-ai-todo pr-changes-requested <ID>
+claimd pr-changes-requested <ID>
 ```
 
 Example:
 
 ```bash
-ai-todo pr-changes-requested 6d45
+claimd pr-changes-requested 6d45
 ```
 
 ### `done`
@@ -267,13 +267,13 @@ ai-todo pr-changes-requested 6d45
 Mark a todo as done. Clears the `claimed_by` field. When a todo is marked done, it is automatically moved from the `depends_on` list to the `depends_on_completed` list of any todo that depended on it. Once all dependencies are resolved, that todo becomes claimable.
 
 ```bash
-ai-todo done <ID>
+claimd done <ID>
 ```
 
 Example:
 
 ```bash
-ai-todo done 6d45
+claimd done 6d45
 # Any todo with 6d45 in its depends_on list now has it in depends_on_completed instead
 ```
 
@@ -282,7 +282,7 @@ ai-todo done 6d45
 Mark a todo as incomplete. Clears the `claimed_by` field. Optionally appends a reason to the description.
 
 ```bash
-ai-todo incomplete <ID> [OPTIONS]
+claimd incomplete <ID> [OPTIONS]
 ```
 
 | Option | Description |
@@ -292,7 +292,7 @@ ai-todo incomplete <ID> [OPTIONS]
 Example:
 
 ```bash
-ai-todo incomplete 6d45 --reason "blocked on design review"
+claimd incomplete 6d45 --reason "blocked on design review"
 ```
 
 ### `unclaim`
@@ -300,13 +300,13 @@ ai-todo incomplete 6d45 --reason "blocked on design review"
 Reset a todo to `New`, transitioning from `InProgress` or `Incomplete`. Clears the `claimed_by` field.
 
 ```bash
-ai-todo unclaim <ID>
+claimd unclaim <ID>
 ```
 
 Example:
 
 ```bash
-ai-todo unclaim 6d45
+claimd unclaim 6d45
 ```
 
 ### `edit`
@@ -314,7 +314,7 @@ ai-todo unclaim 6d45
 Edit fields on an existing todo item. Only specified fields are changed.
 
 ```bash
-ai-todo edit <ID> [OPTIONS]
+claimd edit <ID> [OPTIONS]
 ```
 
 | Option | Description |
@@ -332,10 +332,10 @@ ai-todo edit <ID> [OPTIONS]
 Example:
 
 ```bash
-ai-todo edit 6d45 --title "Updated title" --priority 1 --tag new-tag
-ai-todo edit 6d45 --link "https://github.com/org/repo/issues/99" --source github
-ai-todo edit c022 --add-dep 6d45 --add-dep f5b8
-ai-todo edit c022 --remove-dep f5b8
+claimd edit 6d45 --title "Updated title" --priority 1 --tag new-tag
+claimd edit 6d45 --link "https://github.com/org/repo/issues/99" --source github
+claimd edit c022 --add-dep 6d45 --add-dep f5b8
+claimd edit c022 --remove-dep f5b8
 ```
 
 ### `reorder`
@@ -343,7 +343,7 @@ ai-todo edit c022 --remove-dep f5b8
 Move a todo to a specific position in the list (0-indexed).
 
 ```bash
-ai-todo reorder <ID> --position <N>
+claimd reorder <ID> --position <N>
 ```
 
 | Option | Description |
@@ -353,7 +353,7 @@ ai-todo reorder <ID> --position <N>
 Example:
 
 ```bash
-ai-todo reorder 6d45 --position 0   # move to top
+claimd reorder 6d45 --position 0   # move to top
 ```
 
 ### `remove`
@@ -361,13 +361,13 @@ ai-todo reorder 6d45 --position 0   # move to top
 Delete a todo entirely.
 
 ```bash
-ai-todo remove <ID>
+claimd remove <ID>
 ```
 
 Example:
 
 ```bash
-ai-todo remove 6d45
+claimd remove 6d45
 ```
 
 ### `project list`
@@ -375,15 +375,15 @@ ai-todo remove 6d45
 List all known projects, their active state, and store paths.
 
 ```bash
-ai-todo project list
+claimd project list
 ```
 
 Example output:
 
 ```
-(default)             active   /Users/me/.ai-todo
-backend               active   /Users/me/.ai-todo/projects/backend
-frontend              INACTIVE /Users/me/.ai-todo/projects/frontend
+(default)             active   /Users/me/.claimd
+backend               active   /Users/me/.claimd/projects/backend
+frontend              INACTIVE /Users/me/.claimd/projects/frontend
 ```
 
 ### `project status`
@@ -391,13 +391,13 @@ frontend              INACTIVE /Users/me/.ai-todo/projects/frontend
 Show the active state of a specific project.
 
 ```bash
-ai-todo project status <NAME>
+claimd project status <NAME>
 ```
 
 Example:
 
 ```bash
-ai-todo project status backend
+claimd project status backend
 # backend: active
 ```
 
@@ -406,13 +406,13 @@ ai-todo project status backend
 Activate a project, re-enabling `claim` and `claim-multi`.
 
 ```bash
-ai-todo project activate <NAME>
+claimd project activate <NAME>
 ```
 
 Example:
 
 ```bash
-ai-todo project activate backend
+claimd project activate backend
 # backend: active
 ```
 
@@ -421,13 +421,13 @@ ai-todo project activate backend
 Deactivate a project, blocking all `→ InProgress` transitions. Existing in-progress tasks are unaffected.
 
 ```bash
-ai-todo project deactivate <NAME>
+claimd project deactivate <NAME>
 ```
 
 Example:
 
 ```bash
-ai-todo project deactivate frontend
+claimd project deactivate frontend
 # frontend: INACTIVE
 ```
 
@@ -437,27 +437,27 @@ Todos can declare dependencies on other todos. A todo with unresolved dependenci
 
 ```bash
 # Create tasks with a dependency chain
-ai-todo add "Design schema"
-ai-todo add "Build API" --depends-on 6d45
-ai-todo add "Write tests" --depends-on 6d45 --depends-on f5b8
+claimd add "Design schema"
+claimd add "Build API" --depends-on 6d45
+claimd add "Write tests" --depends-on 6d45 --depends-on f5b8
 
 # Trying to claim "Write tests" fails (exit code 2)
-ai-todo claim c022 --agent "agent-1"
+claimd claim c022 --agent "agent-1"
 # Error: Todo c0228801 has unresolved dependencies: 6d45a75a, f5b883f1
 
 # Complete dependencies one by one
-ai-todo done 6d45   # "Design schema" done — auto-moves from depends_on to depends_on_completed
-ai-todo done f5b8   # "Build API" done — all deps resolved
+claimd done 6d45   # "Design schema" done — auto-moves from depends_on to depends_on_completed
+claimd done f5b8   # "Build API" done — all deps resolved
 
 # Now claim succeeds
-ai-todo claim c022 --agent "agent-1"
+claimd claim c022 --agent "agent-1"
 ```
 
 Dependencies can also be added/removed after creation via `edit`:
 
 ```bash
-ai-todo edit c022 --add-dep 6d45
-ai-todo edit c022 --remove-dep 6d45
+claimd edit c022 --add-dep 6d45
+claimd edit c022 --remove-dep 6d45
 ```
 
 ## Concurrency model
@@ -476,25 +476,25 @@ Pass `--json` to any command for machine-parseable output. Every task object inc
 
 ```bash
 # List as JSON array — each item includes project_active
-ai-todo list --json
+claimd list --json
 # [{"id":"...","title":"...","status":"new","project_active":true,...}]
 
 # Single item as JSON object
-ai-todo show 6d45 --json
+claimd show 6d45 --json
 
 # Project commands as JSON
-ai-todo project list --json
+claimd project list --json
 # {"default_store":true,"projects":[{"name":"backend","active":true},{"name":"frontend","active":false}]}
 
-ai-todo project status backend --json
+claimd project status backend --json
 # {"name":"backend","active":true}
 
 # Errors as JSON to stderr
-ai-todo claim 6d45 --json
+claimd claim 6d45 --json
 # {"error":"Todo 6d45a75a is already being worked on by 'agent-1'","code":"already_claimed"}
 
 # Project inactive error
-ai-todo --project frontend claim 6d45 --json
+claimd --project frontend claim 6d45 --json
 # {"error":"Project is inactive — claiming is disabled","code":"project_inactive"}
 ```
 

@@ -13,11 +13,11 @@ use cli::{Cli, Command, ProjectCommand};
 use store::Store;
 
 fn default_dir() -> PathBuf {
-    dirs_next().unwrap_or_else(|| PathBuf::from(".ai-todo"))
+    dirs_next().unwrap_or_else(|| PathBuf::from(".claimd"))
 }
 
 fn dirs_next() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".ai-todo"))
+    std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".claimd"))
 }
 
 fn main() {

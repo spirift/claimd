@@ -25,7 +25,7 @@ pub enum ProjectCommand {
 }
 
 #[derive(Parser)]
-#[command(name = "ai-todo", about = "Todo list for multi-agent AI collaboration", long_about = "Concurrent todo list CLI for multi-agent AI workflows.\n\nAgents can add, view, claim, and complete tasks with atomic file locking that prevents two agents picking up the same work. Tasks are scoped per project; inactive projects block new claims while keeping existing work visible and completable.")]
+#[command(name = "claimd", about = "Todo list for multi-agent AI collaboration", long_about = "Concurrent todo list CLI for multi-agent AI workflows.\n\nAgents can add, view, claim, and complete tasks with atomic file locking that prevents two agents picking up the same work. Tasks are scoped per project; inactive projects block new claims while keeping existing work visible and completable.")]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
@@ -35,11 +35,11 @@ pub struct Cli {
     pub json: bool,
 
     /// Path to the todo store directory
-    #[arg(long, global = true, env = "AI_TODO_DIR")]
+    #[arg(long, global = true, env = "CLAIMD_DIR")]
     pub dir: Option<PathBuf>,
 
     /// Project name (isolates tasks per project)
-    #[arg(long, global = true, env = "AI_TODO_PROJECT")]
+    #[arg(long, global = true, env = "CLAIMD_PROJECT")]
     pub project: Option<String>,
 }
 
