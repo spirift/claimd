@@ -48,7 +48,7 @@ impl fmt::Display for Error {
         match self {
             Error::Io(e) => write!(f, "IO error: {e}"),
             Error::Json(e) => write!(f, "JSON error: {e}"),
-            Error::NotFound { id_prefix } => write!(f, "No todo found matching '{id_prefix}'"),
+            Error::NotFound { id_prefix } => write!(f, "No task found matching '{id_prefix}'"),
             Error::AmbiguousPrefix { id_prefix, matches } => {
                 write!(f, "Prefix '{id_prefix}' is ambiguous, matches: ")?;
                 for (i, id) in matches.iter().enumerate() {
@@ -60,8 +60,8 @@ impl fmt::Display for Error {
             Error::AlreadyClaimed { id, by } => {
                 let short = &id.to_string()[..8];
                 match by {
-                    Some(agent) => write!(f, "Todo {short} is already being worked on by '{agent}'"),
-                    None => write!(f, "Todo {short} is already being worked on"),
+                    Some(agent) => write!(f, "Task {short} is already being worked on by '{agent}'"),
+                    None => write!(f, "Task {short} is already being worked on"),
                 }
             }
             Error::AlreadyLocked => write!(f, "Store is locked by another process — try again"),
@@ -72,7 +72,7 @@ impl fmt::Display for Error {
             Error::HasPendingDeps { id, pending } => {
                 let short = &id.to_string()[..8];
                 let deps: Vec<String> = pending.iter().map(|u| u.to_string()[..8].to_string()).collect();
-                write!(f, "Todo {short} has unresolved dependencies: {}", deps.join(", "))
+                write!(f, "Task {short} has unresolved dependencies: {}", deps.join(", "))
             }
             Error::StoreNotInitialized => write!(f, "Store not initialized. Run 'claimd init' first."),
             Error::ProjectInactive => write!(f, "Project is inactive — claiming is disabled"),

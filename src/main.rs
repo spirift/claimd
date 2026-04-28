@@ -62,13 +62,13 @@ fn run(cli: Cli, store: &Store) -> error::Result<()> {
         }
         Command::List { status, tag, all } => {
             let items = commands::list(store, status.as_ref(), tag.as_deref(), all)?;
-            let refs: Vec<&model::TodoItem> = items.iter().collect();
+            let refs: Vec<&model::TaskItem> = items.iter().collect();
             output::print_items(&refs, &ctx, json);
         }
         Command::Show { id } if project_name.is_none() => {
             // No --project: scan all projects for the ID.
             let projects_dir = base_dir.join("projects");
-            let mut hits: Vec<(String, model::TodoItem, model::ProjectMeta)> = Vec::new();
+            let mut hits: Vec<(String, model::TaskItem, model::ProjectMeta)> = Vec::new();
             if projects_dir.is_dir() {
                 if let Ok(entries) = std::fs::read_dir(&projects_dir) {
                     for entry in entries.flatten() {
@@ -106,7 +106,7 @@ fn run(cli: Cli, store: &Store) -> error::Result<()> {
         }
         Command::ClaimMulti { ids, agent } => {
             let items = commands::claim_multi(store, &ids, agent.as_deref())?;
-            let refs: Vec<&model::TodoItem> = items.iter().collect();
+            let refs: Vec<&model::TaskItem> = items.iter().collect();
             output::print_items(&refs, &ctx, json);
         }
         Command::PrOpen { id, pr_url } => {

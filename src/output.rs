@@ -1,5 +1,5 @@
 use crate::error::Error;
-use crate::model::{ProjectMeta, Status, TodoItem};
+use crate::model::{ProjectMeta, Status, TaskItem};
 
 pub struct OutputContext {
     pub project_active: bool,
@@ -12,7 +12,7 @@ impl OutputContext {
     }
 }
 
-fn inject_project_active(item: &TodoItem, ctx: &OutputContext) -> serde_json::Value {
+fn inject_project_active(item: &TaskItem, ctx: &OutputContext) -> serde_json::Value {
     let mut val = serde_json::to_value(item).unwrap();
     if let serde_json::Value::Object(ref mut map) = val {
         map.insert("project_active".to_string(), serde_json::Value::Bool(ctx.project_active));
@@ -23,7 +23,7 @@ fn inject_project_active(item: &TodoItem, ctx: &OutputContext) -> serde_json::Va
     val
 }
 
-pub fn print_item(item: &TodoItem, ctx: &OutputContext, json: bool) {
+pub fn print_item(item: &TaskItem, ctx: &OutputContext, json: bool) {
     if json {
         println!("{}", inject_project_active(item, ctx));
     } else {
@@ -60,7 +60,7 @@ pub fn print_item(item: &TodoItem, ctx: &OutputContext, json: bool) {
     }
 }
 
-pub fn print_item_detail(item: &TodoItem, ctx: &OutputContext, json: bool) {
+pub fn print_item_detail(item: &TaskItem, ctx: &OutputContext, json: bool) {
     if json {
         let val = inject_project_active(item, ctx);
         println!("{}", serde_json::to_string_pretty(&val).unwrap());
@@ -111,13 +111,13 @@ pub fn print_item_detail(item: &TodoItem, ctx: &OutputContext, json: bool) {
     }
 }
 
-pub fn print_items(items: &[&TodoItem], ctx: &OutputContext, json: bool) {
+pub fn print_items(items: &[&TaskItem], ctx: &OutputContext, json: bool) {
     if json {
         let vals: Vec<serde_json::Value> = items.iter().map(|item| inject_project_active(item, ctx)).collect();
         println!("{}", serde_json::to_string(&vals).unwrap());
     } else {
         if items.is_empty() {
-            println!("No todos found.");
+            println!("No tasks found.");
             return;
         }
         if !ctx.project_active {

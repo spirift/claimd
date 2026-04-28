@@ -43,7 +43,7 @@ impl std::str::FromStr for Status {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TodoItem {
+pub struct TaskItem {
     pub id: Uuid,
     pub title: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -72,7 +72,7 @@ pub struct TodoItem {
     pub depends_on_completed: Vec<Uuid>,
 }
 
-impl TodoItem {
+impl TaskItem {
     pub fn new(
         title: String,
         description: Option<String>,
@@ -84,7 +84,7 @@ impl TodoItem {
         depends_on: Vec<Uuid>,
     ) -> Self {
         let now = Utc::now();
-        TodoItem {
+        TaskItem {
             id: Uuid::new_v4(),
             title,
             description,
@@ -114,8 +114,8 @@ impl TodoItem {
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
-pub struct TodoList {
-    pub items: Vec<TodoItem>,
+pub struct TaskList {
+    pub items: Vec<TaskItem>,
 }
 
 fn default_active() -> bool { true }

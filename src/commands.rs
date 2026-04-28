@@ -2,11 +2,11 @@ use chrono::Utc;
 use uuid::Uuid;
 
 use crate::error::{Error, Result};
-use crate::model::{ProjectMeta, Status, TodoItem, TodoList};
+use crate::model::{ProjectMeta, Status, TaskItem, TaskList};
 use crate::store::Store;
 
 /// Find item by UUID prefix (minimum 4 chars). Returns mutable reference.
-fn find_by_prefix_mut<'a>(items: &'a mut [TodoItem], prefix: &str) -> Result<&'a mut TodoItem> {
+fn find_by_prefix_mut<'a>(items: &'a mut [TaskItem], prefix: &str) -> Result<&'a mut TaskItem> {
     let matches: Vec<usize> = items
         .iter()
         .enumerate()
@@ -25,7 +25,7 @@ fn find_by_prefix_mut<'a>(items: &'a mut [TodoItem], prefix: &str) -> Result<&'a
 }
 
 /// Find item by UUID prefix. Returns immutable reference.
-fn find_by_prefix<'a>(items: &'a [TodoItem], prefix: &str) -> Result<&'a TodoItem> {
+fn find_by_prefix<'a>(items: &'a [TaskItem], prefix: &str) -> Result<&'a TaskItem> {
     let matches: Vec<usize> = items
         .iter()
         .enumerate()
@@ -44,7 +44,7 @@ fn find_by_prefix<'a>(items: &'a [TodoItem], prefix: &str) -> Result<&'a TodoIte
 }
 
 /// Find index by UUID prefix.
-fn find_index_by_prefix(items: &[TodoItem], prefix: &str) -> Result<usize> {
+fn find_index_by_prefix(items: &[TaskItem], prefix: &str) -> Result<usize> {
     let matches: Vec<usize> = items
         .iter()
         .enumerate()
@@ -67,7 +67,7 @@ pub fn init(store: &Store) -> Result<()> {
 }
 
 /// Resolve a list of UUID prefixes to full UUIDs against the current list.
-fn resolve_prefixes(items: &[TodoItem], prefixes: &[String]) -> Result<Vec<Uuid>> {
+fn resolve_prefixes(items: &[TaskItem], prefixes: &[String]) -> Result<Vec<Uuid>> {
     prefixes
         .iter()
         .map(|p| find_by_prefix(items, p).map(|item| item.id))
@@ -84,10 +84,10 @@ pub fn add(
     source: Option<&str>,
     author: Option<&str>,
     dep_prefixes: &[String],
-) -> Result<TodoItem> {
+) -> Result<TaskItem> {
     store.with_lock(|list| {
         let deps = resolve_prefixes(&list.items, dep_prefixes)?;
-        let item = TodoItem::new(
+        let item = TaskItem::new(
             title.to_string(),
             desc.map(String::from),
             priority,
@@ -103,7 +103,7 @@ pub fn add(
     })
 }
 
-pub fn list_items<'a>(items: &'a TodoList, status: Option<&Status>, tag: Option<&str>, all: bool) -> Vec<&'a TodoItem> {
+pub fn list_items<'a>(items: &'a TaskList, status: Option<&Status>, tag: Option<&str>, all: bool) -> Vec<&'a TaskItem> {
     items
         .items
         .iter()
@@ -125,9 +125,9 @@ pub fn list_items<'a>(items: &'a TodoList, status: Option<&Status>, tag: Option<
         .collect()
 }
 
-pub fn list(store: &Store, status: Option<&Status>, tag: Option<&str>, all: bool) -> Result<Vec<TodoItem>> {
+pub fn list(store: &Store, status: Option<&Status>, tag: Option<&str>, all: bool) -> Result<Vec<TaskItem>> {
     store.with_shared_lock(|list| {
-        let filtered: Vec<TodoItem> = list_items(list, status, tag, all)
+        let filtered: Vec<TaskItem> = list_items(list, status, tag, all)
             .into_iter()
             .cloned()
             .collect();
@@ -135,7 +135,7 @@ pub fn list(store: &Store, status: Option<&Status>, tag: Option<&str>, all: bool
     })
 }
 
-pub fn show(store: &Store, id_prefix: &str) -> Result<TodoItem> {
+pub fn show(store: &Store, id_prefix: &str) -> Result<TaskItem> {
     store.with_shared_lock(|list| {
         let item = find_by_prefix(&list.items, id_prefix)?;
         Ok(item.clone())
@@ -143,7 +143,7 @@ pub fn show(store: &Store, id_prefix: &str) -> Result<TodoItem> {
 }
 
 /// Move the current claimed_by to previously_claimed_by if present.
-fn rotate_claimed_by(item: &mut TodoItem, new_agent: Option<&str>) {
+fn rotate_claimed_by(item: &mut TaskItem, new_agent: Option<&str>) {
     if let Some(prev) = item.claimed_by.take() {
         if !item.previously_claimed_by.contains(&prev) {
             item.previously_claimed_by.push(prev);
@@ -152,7 +152,7 @@ fn rotate_claimed_by(item: &mut TodoItem, new_agent: Option<&str>) {
     item.claimed_by = new_agent.map(String::from);
 }
 
-pub fn claim(store: &Store, id_prefix: &str, agent: Option<&str>) -> Result<TodoItem> {
+pub fn claim(store: &Store, id_prefix: &str, agent: Option<&str>) -> Result<TaskItem> {
     let meta = store.read_project_meta()?;
     store.with_try_lock(|list| {
         let item = find_by_prefix_mut(&mut list.items, id_prefix)?;
@@ -194,7 +194,7 @@ pub fn claim(store: &Store, id_prefix: &str, agent: Option<&str>) -> Result<Todo
     })
 }
 
-pub fn claim_multi(store: &Store, id_prefixes: &[String], agent: Option<&str>) -> Result<Vec<TodoItem>> {
+pub fn claim_multi(store: &Store, id_prefixes: &[String], agent: Option<&str>) -> Result<Vec<TaskItem>> {
     let meta = store.read_project_meta()?;
     store.with_try_lock(|list| {
         // First pass: validate all items are claimable
@@ -252,7 +252,7 @@ pub fn claim_multi(store: &Store, id_prefixes: &[String], agent: Option<&str>) -
     })
 }
 
-pub fn pr_open(store: &Store, id_prefix: &str, pr_url: &str) -> Result<TodoItem> {
+pub fn pr_open(store: &Store, id_prefix: &str, pr_url: &str) -> Result<TaskItem> {
     store.with_lock(|list| {
         let item = find_by_prefix_mut(&mut list.items, id_prefix)?;
         if item.status != Status::InProgress && item.status != Status::PrChangesRequested {
@@ -269,7 +269,7 @@ pub fn pr_open(store: &Store, id_prefix: &str, pr_url: &str) -> Result<TodoItem>
     })
 }
 
-pub fn pr_changes_requested(store: &Store, id_prefix: &str) -> Result<TodoItem> {
+pub fn pr_changes_requested(store: &Store, id_prefix: &str) -> Result<TaskItem> {
     store.with_lock(|list| {
         let item = find_by_prefix_mut(&mut list.items, id_prefix)?;
         if item.status != Status::PrOpen {
@@ -285,7 +285,7 @@ pub fn pr_changes_requested(store: &Store, id_prefix: &str) -> Result<TodoItem> 
     })
 }
 
-pub fn done(store: &Store, id_prefix: &str) -> Result<TodoItem> {
+pub fn done(store: &Store, id_prefix: &str) -> Result<TaskItem> {
     store.with_lock(|list| {
         let idx = find_index_by_prefix(&list.items, id_prefix)?;
         let now = Utc::now();
@@ -308,7 +308,7 @@ pub fn done(store: &Store, id_prefix: &str) -> Result<TodoItem> {
     })
 }
 
-pub fn incomplete(store: &Store, id_prefix: &str, reason: Option<&str>) -> Result<TodoItem> {
+pub fn incomplete(store: &Store, id_prefix: &str, reason: Option<&str>) -> Result<TaskItem> {
     store.with_lock(|list| {
         let item = find_by_prefix_mut(&mut list.items, id_prefix)?;
         item.status = Status::Incomplete;
@@ -325,7 +325,7 @@ pub fn incomplete(store: &Store, id_prefix: &str, reason: Option<&str>) -> Resul
     })
 }
 
-pub fn unclaim(store: &Store, id_prefix: &str) -> Result<TodoItem> {
+pub fn unclaim(store: &Store, id_prefix: &str) -> Result<TaskItem> {
     store.with_lock(|list| {
         let item = find_by_prefix_mut(&mut list.items, id_prefix)?;
         match item.status {
@@ -356,7 +356,7 @@ pub fn edit(
     author: Option<&str>,
     add_dep_prefixes: &[String],
     remove_dep_prefixes: &[String],
-) -> Result<TodoItem> {
+) -> Result<TaskItem> {
     store.with_lock(|list| {
         // Resolve dep prefixes before borrowing mutably
         let add_deps = resolve_prefixes(&list.items, add_dep_prefixes)?;
@@ -384,7 +384,7 @@ pub fn edit(
     })
 }
 
-pub fn reorder(store: &Store, id_prefix: &str, position: usize) -> Result<TodoItem> {
+pub fn reorder(store: &Store, id_prefix: &str, position: usize) -> Result<TaskItem> {
     store.with_lock(|list| {
         let idx = find_index_by_prefix(&list.items, id_prefix)?;
         let item = list.items.remove(idx);
@@ -394,7 +394,7 @@ pub fn reorder(store: &Store, id_prefix: &str, position: usize) -> Result<TodoIt
     })
 }
 
-pub fn remove(store: &Store, id_prefix: &str) -> Result<TodoItem> {
+pub fn remove(store: &Store, id_prefix: &str) -> Result<TaskItem> {
     store.with_lock(|list| {
         let idx = find_index_by_prefix(&list.items, id_prefix)?;
         let item = list.items.remove(idx);

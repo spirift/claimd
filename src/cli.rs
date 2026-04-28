@@ -25,7 +25,7 @@ pub enum ProjectCommand {
 }
 
 #[derive(Parser)]
-#[command(name = "claimd", about = "Todo list for multi-agent AI collaboration", long_about = "Concurrent todo list CLI for multi-agent AI workflows.\n\nAgents can add, view, claim, and complete tasks with atomic file locking that prevents two agents picking up the same work. Tasks are scoped per project; inactive projects block new claims while keeping existing work visible and completable.")]
+#[command(name = "claimd", about = "Task manager for multi-agent AI collaboration", long_about = "Concurrent task manager CLI for multi-agent AI workflows.\n\nAgents can add, view, claim, and complete tasks with atomic file locking that prevents two agents picking up the same work. Tasks are scoped per project; inactive projects block new claims while keeping existing work visible and completable.")]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
@@ -34,7 +34,7 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub json: bool,
 
-    /// Path to the todo store directory
+    /// Path to the task store directory
     #[arg(long, global = true, env = "CLAIMD_DIR")]
     pub dir: Option<PathBuf>,
 
@@ -45,12 +45,12 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
-    /// Initialize the todo store
+    /// Initialize the task store
     Init,
 
-    /// Add a new todo item
+    /// Add a new task
     Add {
-        /// Title of the todo
+        /// Title of the task
         title: String,
         /// Description
         #[arg(long)]
@@ -64,18 +64,18 @@ pub enum Command {
         /// Link (URL or reference)
         #[arg(long)]
         link: Option<String>,
-        /// Source (where this todo came from)
+        /// Source (where this task came from)
         #[arg(long)]
         source: Option<String>,
-        /// Author (who created this todo)
+        /// Author (who created this task)
         #[arg(long)]
         author: Option<String>,
-        /// Depends on these todo UUIDs/prefixes (repeatable)
+        /// Depends on these task UUIDs/prefixes (repeatable)
         #[arg(long = "depends-on")]
         depends_on: Vec<String>,
     },
 
-    /// List todo items
+    /// List tasks
     List {
         /// Filter by status
         #[arg(long)]
@@ -88,13 +88,13 @@ pub enum Command {
         all: bool,
     },
 
-    /// Show a single todo item in detail
+    /// Show a single task in detail
     Show {
         /// UUID or prefix
         id: String,
     },
 
-    /// Atomically claim a todo (New/Incomplete/PrChangesRequested → InProgress). Blocked if the project is inactive.
+    /// Atomically claim a task (New/Incomplete/PrChangesRequested → InProgress). Blocked if the project is inactive.
     Claim {
         /// UUID or prefix
         id: String,
@@ -103,7 +103,7 @@ pub enum Command {
         agent: Option<String>,
     },
 
-    /// Atomically claim multiple todos (all-or-nothing). Blocked if the project is inactive.
+    /// Atomically claim multiple tasks (all-or-nothing). Blocked if the project is inactive.
     ClaimMulti {
         /// UUIDs or prefixes
         ids: Vec<String>,
@@ -112,7 +112,7 @@ pub enum Command {
         agent: Option<String>,
     },
 
-    /// Mark a todo as having a PR open (InProgress → PrOpen)
+    /// Mark a task as having a PR open (InProgress → PrOpen)
     PrOpen {
         /// UUID or prefix
         id: String,
@@ -121,19 +121,19 @@ pub enum Command {
         pr_url: String,
     },
 
-    /// Mark a todo's PR as having changes requested (PrOpen → PrChangesRequested)
+    /// Mark a task's PR as having changes requested (PrOpen → PrChangesRequested)
     PrChangesRequested {
         /// UUID or prefix
         id: String,
     },
 
-    /// Mark a todo as done
+    /// Mark a task as done
     Done {
         /// UUID or prefix
         id: String,
     },
 
-    /// Mark a todo as incomplete
+    /// Mark a task as incomplete
     Incomplete {
         /// UUID or prefix
         id: String,
@@ -148,7 +148,7 @@ pub enum Command {
         id: String,
     },
 
-    /// Edit a todo item's fields
+    /// Edit a task's fields
     Edit {
         /// UUID or prefix
         id: String,
@@ -173,15 +173,15 @@ pub enum Command {
         /// New author
         #[arg(long)]
         author: Option<String>,
-        /// Add dependency on a todo UUID/prefix (repeatable)
+        /// Add dependency on a task UUID/prefix (repeatable)
         #[arg(long = "add-dep")]
         add_deps: Vec<String>,
-        /// Remove dependency on a todo UUID/prefix (repeatable)
+        /// Remove dependency on a task UUID/prefix (repeatable)
         #[arg(long = "remove-dep")]
         remove_deps: Vec<String>,
     },
 
-    /// Move a todo to a specific position in the list
+    /// Move a task to a specific position in the list
     Reorder {
         /// UUID or prefix
         id: String,
@@ -190,7 +190,7 @@ pub enum Command {
         position: usize,
     },
 
-    /// Remove a todo entirely
+    /// Remove a task entirely
     Remove {
         /// UUID or prefix
         id: String,

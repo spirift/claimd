@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use fs2::FileExt;
 
 use crate::error::{Error, Result};
-use crate::model::{ProjectMeta, TodoList};
+use crate::model::{ProjectMeta, TaskList};
 
 pub struct Store {
     dir: PathBuf,
@@ -16,15 +16,15 @@ impl Store {
     }
 
     pub fn data_path(&self) -> PathBuf {
-        self.dir.join("todo.json")
+        self.dir.join("tasks.json")
     }
 
     fn lock_path(&self) -> PathBuf {
-        self.dir.join("todo.lock")
+        self.dir.join("tasks.lock")
     }
 
     fn tmp_path(&self) -> PathBuf {
-        self.dir.join("todo.json.tmp")
+        self.dir.join("tasks.json.tmp")
     }
 
     fn project_meta_path(&self) -> PathBuf {
@@ -41,7 +41,7 @@ impl Store {
         // Create data file if it doesn't exist
         let data = self.data_path();
         if !data.exists() {
-            let list = TodoList::default();
+            let list = TaskList::default();
             let bytes = serde_json::to_vec_pretty(&list)?;
             fs::write(&data, &bytes)?;
         }
@@ -64,13 +64,13 @@ impl Store {
         Ok(f)
     }
 
-    fn read_data(&self) -> Result<TodoList> {
+    fn read_data(&self) -> Result<TaskList> {
         let bytes = fs::read(self.data_path())?;
-        let list: TodoList = serde_json::from_slice(&bytes)?;
+        let list: TaskList = serde_json::from_slice(&bytes)?;
         Ok(list)
     }
 
-    fn write_data(&self, list: &TodoList) -> Result<()> {
+    fn write_data(&self, list: &TaskList) -> Result<()> {
         let bytes = serde_json::to_vec_pretty(list)?;
         fs::write(self.tmp_path(), &bytes)?;
         fs::rename(self.tmp_path(), self.data_path())?;
@@ -81,7 +81,7 @@ impl Store {
     /// Returns AlreadyLocked immediately if another process holds the lock.
     pub fn with_try_lock<F, T>(&self, f: F) -> Result<T>
     where
-        F: FnOnce(&mut TodoList) -> Result<T>,
+        F: FnOnce(&mut TaskList) -> Result<T>,
     {
         let lock_file = self.open_lock_file()?;
         lock_file
@@ -98,7 +98,7 @@ impl Store {
     /// Blocking lock for general mutations.
     pub fn with_lock<F, T>(&self, f: F) -> Result<T>
     where
-        F: FnOnce(&mut TodoList) -> Result<T>,
+        F: FnOnce(&mut TaskList) -> Result<T>,
     {
         let lock_file = self.open_lock_file()?;
         lock_file.lock_exclusive()?;
@@ -112,7 +112,7 @@ impl Store {
     /// Shared lock for read-only operations.
     pub fn with_shared_lock<F, T>(&self, f: F) -> Result<T>
     where
-        F: FnOnce(&TodoList) -> Result<T>,
+        F: FnOnce(&TaskList) -> Result<T>,
     {
         let lock_file = self.open_lock_file()?;
         lock_file.lock_shared()?;
