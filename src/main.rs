@@ -8,16 +8,15 @@ mod store;
 use std::path::PathBuf;
 
 use clap::Parser;
+use uuid::Uuid;
 
 use cli::{Cli, Command, ProjectCommand};
 use store::Store;
 
 fn default_dir() -> PathBuf {
-    dirs_next().unwrap_or_else(|| PathBuf::from(".claimd"))
-}
-
-fn dirs_next() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".claimd"))
+    std::env::var_os("HOME")
+        .map(|h| PathBuf::from(h).join(".claimd"))
+        .unwrap_or_else(|| PathBuf::from(".claimd"))
 }
 
 fn main() {
@@ -40,11 +39,17 @@ fn main() {
 
 fn run(cli: Cli, store: &Store) -> error::Result<()> {
     let json = cli.json;
+    let project_name = cli.project.clone();
+    let base_dir = cli.dir.clone().unwrap_or_else(default_dir);
 
-    // Load project meta once — used for output context on all task commands.
-    // Defaults to active=true for uninitialized stores and the default store.
+    // All task commands except `show` and `project` require --project.
+    let needs_project = !matches!(cli.command, Command::Project { .. } | Command::Show { .. });
+    if needs_project && project_name.is_none() {
+        return Err(error::Error::ProjectRequired);
+    }
+
     let project_meta = store.read_project_meta().unwrap_or_default();
-    let ctx = output::OutputContext::from_meta(&project_meta);
+    let ctx = output::OutputContext::from_meta(&project_meta, project_name.clone());
 
     match cli.command {
         Command::Init => {
@@ -59,6 +64,37 @@ fn run(cli: Cli, store: &Store) -> error::Result<()> {
             let items = commands::list(store, status.as_ref(), tag.as_deref(), all)?;
             let refs: Vec<&model::TodoItem> = items.iter().collect();
             output::print_items(&refs, &ctx, json);
+        }
+        Command::Show { id } if project_name.is_none() => {
+            // No --project: scan all projects for the ID.
+            let projects_dir = base_dir.join("projects");
+            let mut hits: Vec<(String, model::TodoItem, model::ProjectMeta)> = Vec::new();
+            if projects_dir.is_dir() {
+                if let Ok(entries) = std::fs::read_dir(&projects_dir) {
+                    for entry in entries.flatten() {
+                        if entry.path().is_dir() {
+                            let name = entry.file_name().to_string_lossy().to_string();
+                            let ps = Store::new(entry.path());
+                            if let Ok(item) = commands::show(&ps, &id) {
+                                let meta = ps.read_project_meta().unwrap_or_default();
+                                hits.push((name, item, meta));
+                            }
+                        }
+                    }
+                }
+            }
+            match hits.len() {
+                0 => return Err(error::Error::NotFound { id_prefix: id }),
+                1 => {
+                    let (proj_name, item, meta) = hits.remove(0);
+                    let ctx = output::OutputContext::from_meta(&meta, Some(proj_name));
+                    output::print_item_detail(&item, &ctx, json);
+                }
+                _ => {
+                    let matches: Vec<Uuid> = hits.iter().map(|(_, item, _)| item.id).collect();
+                    return Err(error::Error::AmbiguousPrefix { id_prefix: id, matches });
+                }
+            }
         }
         Command::Show { id } => {
             let item = commands::show(store, &id)?;
@@ -106,7 +142,6 @@ fn run(cli: Cli, store: &Store) -> error::Result<()> {
             output::print_message(&format!("Removed: {} ({})", item.title, item.short_id()), json);
         }
         Command::Project { command } => {
-            let base_dir = cli.dir.unwrap_or_else(default_dir);
             let projects_dir = base_dir.join("projects");
 
             match command {
@@ -123,7 +158,6 @@ fn run(cli: Cli, store: &Store) -> error::Result<()> {
                             }
                         }
                     }
-                    let has_default = base_dir.join("todo.json").exists();
                     names.sort();
 
                     if json {
@@ -132,24 +166,15 @@ fn run(cli: Cli, store: &Store) -> error::Result<()> {
                             let active = project_store.read_project_meta().map(|m| m.active).unwrap_or(true);
                             serde_json::json!({ "name": name, "active": active })
                         }).collect();
-                        let val = serde_json::json!({
-                            "default_store": has_default,
-                            "projects": projects,
-                        });
-                        println!("{}", serde_json::to_string_pretty(&val).unwrap());
+                        println!("{}", serde_json::to_string_pretty(&serde_json::json!({ "projects": projects })).unwrap());
+                    } else if names.is_empty() {
+                        println!("No projects found.");
                     } else {
-                        if has_default {
-                            println!("{:<20} {:<8} {}", "(default)", "active", base_dir.display());
-                        }
-                        if names.is_empty() && !has_default {
-                            println!("No projects found.");
-                        } else {
-                            for name in &names {
-                                let project_store = Store::new(projects_dir.join(name));
-                                let active = project_store.read_project_meta().map(|m| m.active).unwrap_or(true);
-                                let state = if active { "active" } else { "INACTIVE" };
-                                println!("{:<20} {:<8} {}", name, state, projects_dir.join(name).display());
-                            }
+                        for name in &names {
+                            let project_store = Store::new(projects_dir.join(name));
+                            let active = project_store.read_project_meta().map(|m| m.active).unwrap_or(true);
+                            let state = if active { "active" } else { "INACTIVE" };
+                            println!("{:<20} {:<8} {}", name, state, projects_dir.join(name).display());
                         }
                     }
                 }

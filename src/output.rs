@@ -3,11 +3,12 @@ use crate::model::{ProjectMeta, Status, TodoItem};
 
 pub struct OutputContext {
     pub project_active: bool,
+    pub project_name: Option<String>,
 }
 
 impl OutputContext {
-    pub fn from_meta(meta: &ProjectMeta) -> Self {
-        OutputContext { project_active: meta.active }
+    pub fn from_meta(meta: &ProjectMeta, project_name: Option<String>) -> Self {
+        OutputContext { project_active: meta.active, project_name }
     }
 }
 
@@ -15,6 +16,9 @@ fn inject_project_active(item: &TodoItem, ctx: &OutputContext) -> serde_json::Va
     let mut val = serde_json::to_value(item).unwrap();
     if let serde_json::Value::Object(ref mut map) = val {
         map.insert("project_active".to_string(), serde_json::Value::Bool(ctx.project_active));
+        if let Some(ref name) = ctx.project_name {
+            map.insert("project".to_string(), serde_json::Value::String(name.clone()));
+        }
     }
     val
 }
@@ -65,7 +69,11 @@ pub fn print_item_detail(item: &TodoItem, ctx: &OutputContext, json: bool) {
         println!("Title:       {}", item.title);
         println!("Status:      {}", item.status);
         println!("Priority:    {}", item.priority);
-        println!("Project:     {}", if ctx.project_active { "active" } else { "INACTIVE" });
+        let proj_status = if ctx.project_active { "active" } else { "INACTIVE" };
+        match &ctx.project_name {
+            Some(name) => println!("Project:     {} ({})", name, proj_status),
+            None => println!("Project:     {}", proj_status),
+        }
         if let Some(desc) = &item.description {
             println!("Description: {desc}");
         }

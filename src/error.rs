@@ -15,12 +15,13 @@ pub enum Error {
     HasPendingDeps { id: Uuid, pending: Vec<Uuid> },
     StoreNotInitialized,
     ProjectInactive,
+    ProjectRequired,
 }
 
 impl Error {
     pub fn exit_code(&self) -> i32 {
         match self {
-            Error::AlreadyClaimed { .. } | Error::AlreadyLocked | Error::HasPendingDeps { .. } | Error::ProjectInactive => 2,
+            Error::AlreadyClaimed { .. } | Error::AlreadyLocked | Error::HasPendingDeps { .. } | Error::ProjectInactive | Error::ProjectRequired => 2,
             _ => 1,
         }
     }
@@ -37,6 +38,7 @@ impl Error {
             Error::HasPendingDeps { .. } => "has_pending_deps",
             Error::StoreNotInitialized => "not_initialized",
             Error::ProjectInactive => "project_inactive",
+            Error::ProjectRequired => "project_required",
         }
     }
 }
@@ -74,6 +76,7 @@ impl fmt::Display for Error {
             }
             Error::StoreNotInitialized => write!(f, "Store not initialized. Run 'claimd init' first."),
             Error::ProjectInactive => write!(f, "Project is inactive — claiming is disabled"),
+            Error::ProjectRequired => write!(f, "A project is required. Use --project <name> or set CLAIMD_PROJECT."),
         }
     }
 }
