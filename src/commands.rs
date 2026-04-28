@@ -412,3 +412,336 @@ pub fn project_set_active(store: &Store, active: bool) -> Result<ProjectMeta> {
     store.write_project_meta(&meta)?;
     Ok(meta)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn setup() -> (TempDir, Store) {
+        let dir = TempDir::new().unwrap();
+        let store = Store::new(dir.path().to_path_buf());
+        store.init().unwrap();
+        (dir, store)
+    }
+
+    fn add_task(store: &Store, title: &str) -> TaskItem {
+        add(store, title, None, 5, &[], None, None, None, &[]).unwrap()
+    }
+
+    // --- add / list / show ---
+
+    #[test]
+    fn add_creates_new_task() {
+        let (_dir, store) = setup();
+        let item = add(&store, "hello", Some("desc"), 2, &["tag1".into()], None, None, None, &[]).unwrap();
+        assert_eq!(item.title, "hello");
+        assert_eq!(item.description.as_deref(), Some("desc"));
+        assert_eq!(item.priority, 2);
+        assert_eq!(item.tags, vec!["tag1"]);
+        assert_eq!(item.status, Status::New);
+    }
+
+    #[test]
+    fn list_excludes_done_by_default() {
+        let (_dir, store) = setup();
+        let a = add_task(&store, "a");
+        let b = add_task(&store, "b");
+        done(&store, &a.short_id()).unwrap();
+        let items = list(&store, None, None, false).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].id, b.id);
+    }
+
+    #[test]
+    fn list_all_includes_done() {
+        let (_dir, store) = setup();
+        let a = add_task(&store, "a");
+        done(&store, &a.short_id()).unwrap();
+        let items = list(&store, None, None, true).unwrap();
+        assert_eq!(items.len(), 1);
+    }
+
+    #[test]
+    fn list_filters_by_status() {
+        let (_dir, store) = setup();
+        let a = add_task(&store, "a");
+        add_task(&store, "b");
+        claim(&store, &a.short_id(), None).unwrap();
+        let items = list(&store, Some(&Status::InProgress), None, false).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].id, a.id);
+    }
+
+    #[test]
+    fn list_filters_by_tag() {
+        let (_dir, store) = setup();
+        add(&store, "a", None, 5, &["backend".into()], None, None, None, &[]).unwrap();
+        add(&store, "b", None, 5, &["frontend".into()], None, None, None, &[]).unwrap();
+        let items = list(&store, None, Some("backend"), false).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].title, "a");
+    }
+
+    #[test]
+    fn show_by_prefix() {
+        let (_dir, store) = setup();
+        let item = add_task(&store, "hello");
+        let found = show(&store, &item.short_id()).unwrap();
+        assert_eq!(found.id, item.id);
+    }
+
+    #[test]
+    fn show_not_found() {
+        let (_dir, store) = setup();
+        let err = show(&store, "0000").unwrap_err();
+        assert!(matches!(err, Error::NotFound { .. }));
+    }
+
+    // --- claim ---
+
+    #[test]
+    fn claim_new_to_in_progress() {
+        let (_dir, store) = setup();
+        let item = add_task(&store, "task");
+        let claimed = claim(&store, &item.short_id(), Some("agent-1")).unwrap();
+        assert_eq!(claimed.status, Status::InProgress);
+        assert_eq!(claimed.claimed_by.as_deref(), Some("agent-1"));
+    }
+
+    #[test]
+    fn claim_already_in_progress_fails() {
+        let (_dir, store) = setup();
+        let item = add_task(&store, "task");
+        claim(&store, &item.short_id(), Some("agent-1")).unwrap();
+        let err = claim(&store, &item.short_id(), Some("agent-2")).unwrap_err();
+        assert!(matches!(err, Error::AlreadyClaimed { .. }));
+    }
+
+    #[test]
+    fn claim_done_fails_with_invalid_transition() {
+        let (_dir, store) = setup();
+        let item = add_task(&store, "task");
+        done(&store, &item.short_id()).unwrap();
+        let err = claim(&store, &item.short_id(), None).unwrap_err();
+        assert!(matches!(err, Error::InvalidTransition { .. }));
+    }
+
+    #[test]
+    fn claim_with_pending_deps_fails() {
+        let (_dir, store) = setup();
+        let dep = add_task(&store, "dep");
+        let task = add(&store, "task", None, 5, &[], None, None, None, &[dep.short_id()]).unwrap();
+        let err = claim(&store, &task.short_id(), None).unwrap_err();
+        assert!(matches!(err, Error::HasPendingDeps { .. }));
+    }
+
+    #[test]
+    fn claim_inactive_project_fails() {
+        let (_dir, store) = setup();
+        let item = add_task(&store, "task");
+        project_set_active(&store, false).unwrap();
+        let err = claim(&store, &item.short_id(), None).unwrap_err();
+        assert!(matches!(err, Error::ProjectInactive));
+    }
+
+    #[test]
+    fn claim_pr_changes_requested_rotates_agent() {
+        let (_dir, store) = setup();
+        let item = add_task(&store, "task");
+        claim(&store, &item.short_id(), Some("agent-1")).unwrap();
+        pr_open(&store, &item.short_id(), "https://example.com/pr/1").unwrap();
+        pr_changes_requested(&store, &item.short_id()).unwrap();
+        let reclaimed = claim(&store, &item.short_id(), Some("agent-2")).unwrap();
+        assert_eq!(reclaimed.status, Status::InProgress);
+        assert_eq!(reclaimed.claimed_by.as_deref(), Some("agent-2"));
+        assert!(reclaimed.previously_claimed_by.contains(&"agent-1".to_string()));
+    }
+
+    // --- done / incomplete / unclaim ---
+
+    #[test]
+    fn done_clears_claimed_by() {
+        let (_dir, store) = setup();
+        let item = add_task(&store, "task");
+        claim(&store, &item.short_id(), Some("agent-1")).unwrap();
+        let finished = done(&store, &item.short_id()).unwrap();
+        assert_eq!(finished.status, Status::Done);
+        assert!(finished.claimed_by.is_none());
+    }
+
+    #[test]
+    fn done_propagates_to_dependents() {
+        let (_dir, store) = setup();
+        let dep = add_task(&store, "dep");
+        let task = add(&store, "task", None, 5, &[], None, None, None, &[dep.short_id()]).unwrap();
+        done(&store, &dep.short_id()).unwrap();
+        let updated = show(&store, &task.short_id()).unwrap();
+        assert!(updated.depends_on.is_empty());
+        assert!(updated.depends_on_completed.contains(&dep.id));
+    }
+
+    #[test]
+    fn done_dep_unblocks_claim() {
+        let (_dir, store) = setup();
+        let dep = add_task(&store, "dep");
+        let task = add(&store, "task", None, 5, &[], None, None, None, &[dep.short_id()]).unwrap();
+        done(&store, &dep.short_id()).unwrap();
+        let claimed = claim(&store, &task.short_id(), None).unwrap();
+        assert_eq!(claimed.status, Status::InProgress);
+    }
+
+    #[test]
+    fn incomplete_appends_reason() {
+        let (_dir, store) = setup();
+        let item = add(&store, "task", Some("original"), 5, &[], None, None, None, &[]).unwrap();
+        claim(&store, &item.short_id(), None).unwrap();
+        let result = incomplete(&store, &item.short_id(), Some("blocked")).unwrap();
+        assert_eq!(result.status, Status::Incomplete);
+        assert!(result.description.unwrap().contains("[incomplete] blocked"));
+    }
+
+    #[test]
+    fn unclaim_resets_to_new() {
+        let (_dir, store) = setup();
+        let item = add_task(&store, "task");
+        claim(&store, &item.short_id(), Some("agent-1")).unwrap();
+        let reset = unclaim(&store, &item.short_id()).unwrap();
+        assert_eq!(reset.status, Status::New);
+        assert!(reset.claimed_by.is_none());
+    }
+
+    #[test]
+    fn unclaim_from_done_fails() {
+        let (_dir, store) = setup();
+        let item = add_task(&store, "task");
+        done(&store, &item.short_id()).unwrap();
+        let err = unclaim(&store, &item.short_id()).unwrap_err();
+        assert!(matches!(err, Error::InvalidTransition { .. }));
+    }
+
+    #[test]
+    fn unclaim_from_incomplete() {
+        let (_dir, store) = setup();
+        let item = add_task(&store, "task");
+        claim(&store, &item.short_id(), None).unwrap();
+        incomplete(&store, &item.short_id(), None).unwrap();
+        let reset = unclaim(&store, &item.short_id()).unwrap();
+        assert_eq!(reset.status, Status::New);
+    }
+
+    // --- PR lifecycle ---
+
+    #[test]
+    fn pr_open_records_url() {
+        let (_dir, store) = setup();
+        let item = add_task(&store, "task");
+        claim(&store, &item.short_id(), None).unwrap();
+        let result = pr_open(&store, &item.short_id(), "https://github.com/org/repo/pull/1").unwrap();
+        assert_eq!(result.status, Status::PrOpen);
+        assert_eq!(result.pr_url.as_deref(), Some("https://github.com/org/repo/pull/1"));
+    }
+
+    #[test]
+    fn pr_changes_requested_from_pr_open() {
+        let (_dir, store) = setup();
+        let item = add_task(&store, "task");
+        claim(&store, &item.short_id(), None).unwrap();
+        pr_open(&store, &item.short_id(), "https://example.com").unwrap();
+        let result = pr_changes_requested(&store, &item.short_id()).unwrap();
+        assert_eq!(result.status, Status::PrChangesRequested);
+    }
+
+    #[test]
+    fn pr_changes_requested_not_from_in_progress_fails() {
+        let (_dir, store) = setup();
+        let item = add_task(&store, "task");
+        claim(&store, &item.short_id(), None).unwrap();
+        let err = pr_changes_requested(&store, &item.short_id()).unwrap_err();
+        assert!(matches!(err, Error::InvalidTransition { .. }));
+    }
+
+    // --- claim_multi ---
+
+    #[test]
+    fn claim_multi_all_or_nothing_success() {
+        let (_dir, store) = setup();
+        let a = add_task(&store, "a");
+        let b = add_task(&store, "b");
+        let ids = vec![a.short_id(), b.short_id()];
+        let claimed = claim_multi(&store, &ids, Some("agent-1")).unwrap();
+        assert_eq!(claimed.len(), 2);
+        assert!(claimed.iter().all(|t| t.status == Status::InProgress));
+    }
+
+    #[test]
+    fn claim_multi_rolls_back_if_any_invalid() {
+        let (_dir, store) = setup();
+        let a = add_task(&store, "a");
+        let b = add_task(&store, "b");
+        claim(&store, &b.short_id(), None).unwrap();
+        let ids = vec![a.short_id(), b.short_id()];
+        let err = claim_multi(&store, &ids, Some("agent-2")).unwrap_err();
+        assert!(matches!(err, Error::AlreadyClaimed { .. }));
+        // a should still be New since the whole operation failed
+        let a_state = show(&store, &a.short_id()).unwrap();
+        assert_eq!(a_state.status, Status::New);
+    }
+
+    // --- edit ---
+
+    #[test]
+    fn edit_updates_fields() {
+        let (_dir, store) = setup();
+        let item = add_task(&store, "original");
+        let updated = edit(
+            &store, &item.short_id(),
+            Some("updated"), Some("new desc"), Some(1),
+            Some(&["newtag".to_string()]),
+            None, None, None, &[], &[],
+        ).unwrap();
+        assert_eq!(updated.title, "updated");
+        assert_eq!(updated.description.as_deref(), Some("new desc"));
+        assert_eq!(updated.priority, 1);
+        assert_eq!(updated.tags, vec!["newtag"]);
+    }
+
+    #[test]
+    fn edit_add_and_remove_deps() {
+        let (_dir, store) = setup();
+        let dep = add_task(&store, "dep");
+        let task = add_task(&store, "task");
+        edit(&store, &task.short_id(), None, None, None, None, None, None, None,
+            &[dep.short_id()], &[]).unwrap();
+        let with_dep = show(&store, &task.short_id()).unwrap();
+        assert!(with_dep.depends_on.contains(&dep.id));
+        edit(&store, &task.short_id(), None, None, None, None, None, None, None,
+            &[], &[dep.short_id()]).unwrap();
+        let without_dep = show(&store, &task.short_id()).unwrap();
+        assert!(without_dep.depends_on.is_empty());
+    }
+
+    // --- reorder / remove ---
+
+    #[test]
+    fn reorder_moves_task_to_position() {
+        let (_dir, store) = setup();
+        let a = add_task(&store, "a");
+        let b = add_task(&store, "b");
+        let c = add_task(&store, "c");
+        reorder(&store, &c.short_id(), 0).unwrap();
+        let items = list(&store, None, None, false).unwrap();
+        assert_eq!(items[0].id, c.id);
+        assert_eq!(items[1].id, a.id);
+        assert_eq!(items[2].id, b.id);
+    }
+
+    #[test]
+    fn remove_deletes_task() {
+        let (_dir, store) = setup();
+        let item = add_task(&store, "task");
+        remove(&store, &item.short_id()).unwrap();
+        let err = show(&store, &item.short_id()).unwrap_err();
+        assert!(matches!(err, Error::NotFound { .. }));
+    }
+}

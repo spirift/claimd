@@ -131,3 +131,61 @@ impl Default for ProjectMeta {
         ProjectMeta { active: true }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uuid::Uuid;
+
+    #[test]
+    fn status_display() {
+        assert_eq!(Status::New.to_string(), "New");
+        assert_eq!(Status::InProgress.to_string(), "InProgress");
+        assert_eq!(Status::PrOpen.to_string(), "PrOpen");
+        assert_eq!(Status::PrChangesRequested.to_string(), "PrChangesRequested");
+        assert_eq!(Status::Done.to_string(), "Done");
+        assert_eq!(Status::Incomplete.to_string(), "Incomplete");
+    }
+
+    #[test]
+    fn status_from_str() {
+        assert_eq!("new".parse::<Status>().unwrap(), Status::New);
+        assert_eq!("in_progress".parse::<Status>().unwrap(), Status::InProgress);
+        assert_eq!("inprogress".parse::<Status>().unwrap(), Status::InProgress);
+        assert_eq!("pr_open".parse::<Status>().unwrap(), Status::PrOpen);
+        assert_eq!("done".parse::<Status>().unwrap(), Status::Done);
+        assert_eq!("incomplete".parse::<Status>().unwrap(), Status::Incomplete);
+        assert!("unknown".parse::<Status>().is_err());
+    }
+
+    #[test]
+    fn short_id_is_8_chars() {
+        let item = TaskItem::new("t".into(), None, 5, vec![], None, None, None, vec![]);
+        assert_eq!(item.short_id().len(), 8);
+        assert!(item.id.to_string().starts_with(&item.short_id()));
+    }
+
+    #[test]
+    fn has_pending_deps_empty() {
+        let item = TaskItem::new("t".into(), None, 5, vec![], None, None, None, vec![]);
+        assert!(!item.has_pending_deps());
+    }
+
+    #[test]
+    fn has_pending_deps_with_dep() {
+        let dep_id = Uuid::new_v4();
+        let item = TaskItem::new("t".into(), None, 5, vec![], None, None, None, vec![dep_id]);
+        assert!(item.has_pending_deps());
+    }
+
+    #[test]
+    fn new_task_defaults() {
+        let item = TaskItem::new("hello".into(), None, 3, vec![], None, None, None, vec![]);
+        assert_eq!(item.title, "hello");
+        assert_eq!(item.status, Status::New);
+        assert_eq!(item.priority, 3);
+        assert!(item.claimed_by.is_none());
+        assert!(item.depends_on.is_empty());
+        assert!(item.depends_on_completed.is_empty());
+    }
+}
