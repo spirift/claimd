@@ -93,12 +93,12 @@ claimd project list
 
 These flags can be used with any command:
 
-| Flag               | Description                                              |
-| ------------------ | -------------------------------------------------------- |
-| `--json`           | Output as JSON instead of human-readable text            |
-| `--dir <DIR>`      | Path to the task store directory (env: `CLAIMD_DIR`)     |
-| `--project <NAME>` | Project name for task isolation (env: `CLAIMD_PROJECT`)  |
-| `-h, --help`       | Print help                                               |
+| Flag               | Description                                             |
+| ------------------ | ------------------------------------------------------- |
+| `--json`           | Output as JSON instead of human-readable text           |
+| `--dir <DIR>`      | Path to the task store directory (env: `CLAIMD_DIR`)    |
+| `--project <NAME>` | Project name for task isolation (env: `CLAIMD_PROJECT`) |
+| `-h, --help`       | Print help                                              |
 
 ## Exit codes
 
@@ -126,15 +126,15 @@ Add a new task with status `New`.
 claimd add <TITLE> [OPTIONS]
 ```
 
-| Option              | Description                                               |
-| ------------------- | --------------------------------------------------------- |
-| `--desc <DESC>`     | Description text                                          |
-| `--priority <N>`    | Priority, 0 = highest (default: 5)                        |
-| `--tag <TAG>`       | Tag (repeatable for multiple tags)                        |
-| `--link <URL>`      | Link (URL or reference)                                   |
-| `--source <SOURCE>` | Source (where this task came from, e.g. "jira", "slack")  |
-| `--author <AUTHOR>` | Author (who created this task)                            |
-| `--depends-on <ID>` | Depends on this task UUID/prefix (repeatable)             |
+| Option              | Description                                              |
+| ------------------- | -------------------------------------------------------- |
+| `--desc <DESC>`     | Description text                                         |
+| `--priority <N>`    | Priority, 0 = highest (default: 5)                       |
+| `--tag <TAG>`       | Tag (repeatable for multiple tags)                       |
+| `--link <URL>`      | Link (URL or reference)                                  |
+| `--source <SOURCE>` | Source (where this task came from, e.g. "jira", "slack") |
+| `--author <AUTHOR>` | Author (who created this task)                           |
+| `--depends-on <ID>` | Depends on this task UUID/prefix (repeatable)            |
 
 Examples:
 
@@ -170,7 +170,7 @@ claimd list --json
 
 ### `show`
 
-Show full detail of a single task. The only command that works without `--project` — when no project is given it scans all projects to find the task by ID.
+Show full detail of a single task. For convenience this command works without `--project` — when no project is given it scans all projects to find the task by ID.
 
 ```bash
 claimd show <ID>
@@ -317,17 +317,17 @@ Edit fields on an existing task. Only specified fields are changed.
 claimd edit <ID> [OPTIONS]
 ```
 
-| Option              | Description                                             |
-| ------------------- | ------------------------------------------------------- |
-| `--title <TITLE>`   | New title                                               |
-| `--desc <DESC>`     | New description                                         |
-| `--priority <N>`    | New priority                                            |
-| `--tag <TAG>`       | Replace tags (repeatable)                               |
-| `--link <URL>`      | New link                                                |
-| `--source <SOURCE>` | New source                                              |
-| `--author <AUTHOR>` | New author                                              |
-| `--add-dep <ID>`    | Add a dependency on a task UUID/prefix (repeatable)     |
-| `--remove-dep <ID>` | Remove a dependency on a task UUID/prefix (repeatable)  |
+| Option              | Description                                            |
+| ------------------- | ------------------------------------------------------ |
+| `--title <TITLE>`   | New title                                              |
+| `--desc <DESC>`     | New description                                        |
+| `--priority <N>`    | New priority                                           |
+| `--tag <TAG>`       | Replace tags (repeatable)                              |
+| `--link <URL>`      | New link                                               |
+| `--source <SOURCE>` | New source                                             |
+| `--author <AUTHOR>` | New author                                             |
+| `--add-dep <ID>`    | Add a dependency on a task UUID/prefix (repeatable)    |
+| `--remove-dep <ID>` | Remove a dependency on a task UUID/prefix (repeatable) |
 
 Example:
 
