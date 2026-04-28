@@ -2,6 +2,11 @@
 name = "claimd"
 version = "0.1.0"
 edition = "2021"
+description = "Concurrent todo list CLI for multi-agent AI workflows"
+license = "MIT"
+repository = "https://github.com/spirift/claimd"
+keywords = ["todo", "cli", "agents", "tasks"]
+categories = ["command-line-utilities"]
 
 [dependencies]
 clap = { version = "4", features = ["derive", "env"] }
