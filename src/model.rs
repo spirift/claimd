@@ -119,16 +119,22 @@ pub struct TaskList {
 }
 
 fn default_active() -> bool { true }
+fn default_events_enabled() -> bool { true }
+fn default_events_ttl_days() -> u32 { 7 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectMeta {
     #[serde(default = "default_active")]
     pub active: bool,
+    #[serde(default = "default_events_enabled")]
+    pub events_enabled: bool,
+    #[serde(default = "default_events_ttl_days")]
+    pub events_ttl_days: u32,
 }
 
 impl Default for ProjectMeta {
     fn default() -> Self {
-        ProjectMeta { active: true }
+        ProjectMeta { active: true, events_enabled: true, events_ttl_days: 7 }
     }
 }
 

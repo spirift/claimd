@@ -1,6 +1,7 @@
 mod cli;
 mod commands;
 mod error;
+mod event;
 mod model;
 mod output;
 mod store;
@@ -10,8 +11,14 @@ use std::path::PathBuf;
 use clap::Parser;
 use uuid::Uuid;
 
-use cli::{Cli, Command, ProjectCommand};
+use cli::{Cli, Command, EventsCommand, ProjectCommand};
+use event::EventRecord;
 use store::Store;
+
+fn emit(store: &Store, project: &Option<String>, mut ev: EventRecord) {
+    ev.project = project.clone();
+    store.append_event(&ev);
+}
 
 fn default_dir() -> PathBuf {
     std::env::var_os("HOME")
@@ -42,7 +49,7 @@ fn run(cli: Cli, store: &Store) -> error::Result<()> {
     let project_name = cli.project.clone();
     let base_dir = cli.dir.clone().unwrap_or_else(default_dir);
 
-    // All task commands except `show` and `project` require --project.
+    // All task commands except `show`, `project` require --project.
     let needs_project = !matches!(cli.command, Command::Project { .. } | Command::Show { .. });
     if needs_project && project_name.is_none() {
         return Err(error::Error::ProjectRequired);
@@ -57,7 +64,8 @@ fn run(cli: Cli, store: &Store) -> error::Result<()> {
             output::print_message("Store initialized.", json);
         }
         Command::Add { title, desc, priority, tags, link, source, author, depends_on } => {
-            let item = commands::add(store, &title, desc.as_deref(), priority, &tags, link.as_deref(), source.as_deref(), author.as_deref(), &depends_on)?;
+            let (item, ev) = commands::add(store, &title, desc.as_deref(), priority, &tags, link.as_deref(), source.as_deref(), author.as_deref(), &depends_on)?;
+            emit(store, &project_name, ev);
             output::print_item(&item, &ctx, json);
         }
         Command::List { status, tag, all } => {
@@ -101,45 +109,120 @@ fn run(cli: Cli, store: &Store) -> error::Result<()> {
             output::print_item_detail(&item, &ctx, json);
         }
         Command::Claim { id, agent } => {
-            let item = commands::claim(store, &id, agent.as_deref())?;
+            let (item, ev) = commands::claim(store, &id, agent.as_deref())?;
+            emit(store, &project_name, ev);
             output::print_item(&item, &ctx, json);
         }
         Command::ClaimMulti { ids, agent } => {
-            let items = commands::claim_multi(store, &ids, agent.as_deref())?;
+            let (items, evs) = commands::claim_multi(store, &ids, agent.as_deref())?;
+            for ev in evs { emit(store, &project_name, ev); }
             let refs: Vec<&model::TaskItem> = items.iter().collect();
             output::print_items(&refs, &ctx, json);
         }
         Command::PrOpen { id, pr_url } => {
-            let item = commands::pr_open(store, &id, &pr_url)?;
+            let (item, ev) = commands::pr_open(store, &id, &pr_url)?;
+            emit(store, &project_name, ev);
             output::print_item(&item, &ctx, json);
         }
         Command::PrChangesRequested { id } => {
-            let item = commands::pr_changes_requested(store, &id)?;
+            let (item, ev) = commands::pr_changes_requested(store, &id)?;
+            emit(store, &project_name, ev);
             output::print_item(&item, &ctx, json);
         }
         Command::Done { id } => {
-            let item = commands::done(store, &id)?;
+            let (item, ev) = commands::done(store, &id)?;
+            emit(store, &project_name, ev);
             output::print_item(&item, &ctx, json);
         }
         Command::Incomplete { id, reason } => {
-            let item = commands::incomplete(store, &id, reason.as_deref())?;
+            let (item, ev) = commands::incomplete(store, &id, reason.as_deref())?;
+            emit(store, &project_name, ev);
             output::print_item(&item, &ctx, json);
         }
         Command::Unclaim { id } => {
-            let item = commands::unclaim(store, &id)?;
+            let (item, ev) = commands::unclaim(store, &id)?;
+            emit(store, &project_name, ev);
             output::print_item(&item, &ctx, json);
         }
         Command::Edit { id, title, desc, priority, tags, link, source, author, add_deps, remove_deps } => {
-            let item = commands::edit(store, &id, title.as_deref(), desc.as_deref(), priority, tags.as_deref(), link.as_deref(), source.as_deref(), author.as_deref(), &add_deps, &remove_deps)?;
+            let (item, ev) = commands::edit(store, &id, title.as_deref(), desc.as_deref(), priority, tags.as_deref(), link.as_deref(), source.as_deref(), author.as_deref(), &add_deps, &remove_deps)?;
+            emit(store, &project_name, ev);
             output::print_item(&item, &ctx, json);
         }
         Command::Reorder { id, position } => {
-            let item = commands::reorder(store, &id, position)?;
+            let (item, ev) = commands::reorder(store, &id, position)?;
+            emit(store, &project_name, ev);
             output::print_item(&item, &ctx, json);
         }
         Command::Remove { id } => {
-            let item = commands::remove(store, &id)?;
+            let (item, ev) = commands::remove(store, &id)?;
+            emit(store, &project_name, ev);
             output::print_message(&format!("Removed: {} ({})", item.title, item.short_id()), json);
+        }
+        Command::Events { command } => {
+            match command {
+                EventsCommand::List { limit } => {
+                    let events = store.read_events()?;
+                    let slice = if limit == 0 || events.len() <= limit {
+                        &events[..]
+                    } else {
+                        &events[events.len() - limit..]
+                    };
+                    if json {
+                        let vals: Vec<_> = slice.iter()
+                            .map(|e| serde_json::to_value(e).unwrap())
+                            .collect();
+                        println!("{}", serde_json::to_string_pretty(&serde_json::json!({ "events": vals })).unwrap());
+                    } else if slice.is_empty() {
+                        println!("No events.");
+                    } else {
+                        for e in slice {
+                            let transition = match (&e.from, &e.to) {
+                                (Some(f), Some(t)) => format!("{f} → {t}"),
+                                (Some(f), None)    => format!("{f} → ?"),
+                                (None, Some(t))    => format!("? → {t}"),
+                                (None, None)       => String::new(),
+                            };
+                            let title = if e.task.title.len() > 38 {
+                                format!("{}…", &e.task.title[..37])
+                            } else {
+                                e.task.title.clone()
+                            };
+                            println!(
+                                "{}  {:<22}  {}  {:<39}  {}",
+                                e.ts.format("%Y-%m-%dT%H:%M:%SZ"),
+                                e.event.to_string(),
+                                &e.task.id.to_string()[..8],
+                                title,
+                                transition,
+                            );
+                        }
+                    }
+                }
+                EventsCommand::Prune { ttl_days } => {
+                    let ttl = ttl_days.unwrap_or_else(|| {
+                        store.read_project_meta().unwrap_or_default().events_ttl_days
+                    });
+                    let pruned = store.prune_events(ttl)?;
+                    if json {
+                        println!("{}", serde_json::json!({ "pruned": pruned, "ttl_days": ttl }));
+                    } else {
+                        println!("Pruned {pruned} event(s) older than {ttl} days.");
+                    }
+                }
+                EventsCommand::Config { enabled, ttl_days } => {
+                    let meta = commands::project_set_events(store, enabled, ttl_days)?;
+                    if json {
+                        println!("{}", serde_json::json!({
+                            "events_enabled": meta.events_enabled,
+                            "events_ttl_days": meta.events_ttl_days,
+                        }));
+                    } else {
+                        let state = if meta.events_enabled { "enabled" } else { "disabled" };
+                        println!("Events {state}, TTL: {} days.", meta.events_ttl_days);
+                    }
+                }
+            }
         }
         Command::Project { command } => {
             let projects_dir = base_dir.join("projects");
@@ -204,6 +287,18 @@ fn run(cli: Cli, store: &Store) -> error::Result<()> {
                         println!("{}", serde_json::json!({ "name": name, "active": false }));
                     } else {
                         println!("{}: INACTIVE", name);
+                    }
+                }
+                ProjectCommand::Remove { name } => {
+                    let path = projects_dir.join(&name);
+                    if !path.is_dir() {
+                        return Err(error::Error::NotFound { id_prefix: name });
+                    }
+                    std::fs::remove_dir_all(&path)?;
+                    if json {
+                        println!("{}", serde_json::json!({ "name": name, "removed": true }));
+                    } else {
+                        println!("Removed project '{name}' (tasks, events, and metadata deleted).");
                     }
                 }
             }

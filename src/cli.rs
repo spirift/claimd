@@ -4,6 +4,31 @@ use std::path::PathBuf;
 use crate::model::Status;
 
 #[derive(Subcommand)]
+pub enum EventsCommand {
+    /// List recent events for the current project
+    List {
+        /// Number of events to show (0 = all)
+        #[arg(long, short = 'n', default_value = "20")]
+        limit: usize,
+    },
+    /// Remove events older than the configured TTL
+    Prune {
+        /// Days to keep (overrides project config)
+        #[arg(long)]
+        ttl_days: Option<u32>,
+    },
+    /// Configure event settings for the current project
+    Config {
+        /// Enable or disable event logging
+        #[arg(long)]
+        enabled: Option<bool>,
+        /// Days to retain events (default: 7)
+        #[arg(long)]
+        ttl_days: Option<u32>,
+    },
+}
+
+#[derive(Subcommand)]
 pub enum ProjectCommand {
     /// List all projects and their active status
     List,
@@ -19,6 +44,11 @@ pub enum ProjectCommand {
     },
     /// Deactivate a project (block new claims)
     Deactivate {
+        /// Project name
+        name: String,
+    },
+    /// Remove a project and all its data (tasks, events, metadata)
+    Remove {
         /// Project name
         name: String,
     },
@@ -200,5 +230,11 @@ pub enum Command {
     Project {
         #[command(subcommand)]
         command: ProjectCommand,
+    },
+
+    /// Manage the event log
+    Events {
+        #[command(subcommand)]
+        command: EventsCommand,
     },
 }

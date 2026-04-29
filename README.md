@@ -8,6 +8,7 @@ A concurrent task manager CLI built in Rust for multi-agent AI collaboration. Ag
 - **Multi-claim** -- `claim-multi` claims multiple tasks in a single atomic operation with all-or-nothing semantics
 - **Statuses** -- New, InProgress, PrOpen, PrChangesRequested, Done, Incomplete with transition validation
 - **Project active/inactive** -- mark a project inactive to block new claims while keeping all tasks visible and existing in-progress work completable
+- **Event log** -- every state change is appended to `events.jsonl` as an immutable record with full task snapshot; configurable TTL and pruning
 - **JSON mode** -- `--json` flag on any command for machine-parseable output; every task includes a `project_active` field
 - **UUID prefix matching** -- reference any task by the first 4+ characters of its ID
 - **Dependencies** -- declare dependencies between tasks; a task with pending deps cannot be claimed until all deps are done
@@ -44,6 +45,8 @@ Data is stored in `~/.claimd/projects/<name>/` by default:
 - `tasks.json` -- canonical data file
 - `tasks.lock` -- flock target for atomic operations
 - `tasks.json.tmp` -- transient write target (atomic rename)
+- `project.json` -- project metadata (active flag, event settings)
+- `events.jsonl` -- append-only event log; one JSON object per line
 
 Override the base location with `--dir /path` or the `CLAIMD_DIR` environment variable.
 
@@ -429,6 +432,118 @@ Example:
 claimd project deactivate frontend
 # frontend: INACTIVE
 ```
+
+### `project remove`
+
+Delete a project and all its data — tasks, events, and metadata — in one operation. Cannot be undone.
+
+```bash
+claimd project remove <NAME>
+```
+
+Example:
+
+```bash
+claimd project remove old-experiment
+# Removed project 'old-experiment' (tasks, events, and metadata deleted).
+```
+
+## Event log
+
+Every state-changing command appends a record to `events.jsonl` in the project directory. The file is an append-only JSONL stream — one JSON object per line — giving you an immutable audit trail that external tools can tail, watch, or ship to storage.
+
+### Event schema
+
+Each line is a JSON object:
+
+| Field     | Type           | Description                                                                 |
+| --------- | -------------- | --------------------------------------------------------------------------- |
+| `ts`      | datetime (UTC) | When the event was recorded                                                 |
+| `project` | string?        | Project name (set at emit time)                                             |
+| `event`   | string         | Event type (see below)                                                      |
+| `from`    | string?        | Status before the transition (omitted for non-transition events)            |
+| `to`      | string?        | Status after the transition (omitted for non-transition events)             |
+| `task`    | object         | Full task snapshot at the moment the event was recorded                     |
+
+Event types: `created`, `claimed`, `unclaimed`, `pr_opened`, `pr_changes_requested`, `done`, `incomplete`, `edited`, `removed`, `reordered`.
+
+Example:
+
+```json
+{"ts":"2026-04-29T12:00:00Z","project":"backend","event":"claimed","from":"new","to":"in_progress","task":{"id":"...","title":"Fix login bug","status":"in_progress","claimed_by":"agent-1",...}}
+```
+
+### `events list`
+
+Show recent events for a project (default: last 20).
+
+```bash
+claimd events list [-n <N>]
+```
+
+| Option      | Description                     |
+| ----------- | ------------------------------- |
+| `-n <N>`    | Number of events to show (0=all, default: 20) |
+
+```bash
+claimd --project backend events list
+claimd --project backend events list -n 50
+claimd --project backend events list --json
+```
+
+Human-readable output:
+
+```
+2026-04-29T12:00:00Z  claimed                 6d45a75a  Fix login bug                            New → InProgress
+2026-04-29T12:05:00Z  pr_opened               6d45a75a  Fix login bug                            InProgress → PrOpen
+```
+
+### `events prune`
+
+Remove events older than the configured TTL. Safe to run from cron.
+
+```bash
+claimd events prune [--ttl-days <N>]
+```
+
+| Option           | Description                                          |
+| ---------------- | ---------------------------------------------------- |
+| `--ttl-days <N>` | Days to retain (overrides project config, default: 7) |
+
+```bash
+claimd --project backend events prune           # uses project TTL (default: 7 days)
+claimd --project backend events prune --ttl-days 30
+```
+
+### `events config`
+
+Configure event logging for a project. Settings are stored in `project.json`.
+
+```bash
+claimd events config [--enabled <bool>] [--ttl-days <N>]
+```
+
+```bash
+claimd --project backend events config --enabled false     # stop recording events
+claimd --project backend events config --enabled true      # re-enable
+claimd --project backend events config --ttl-days 30       # change TTL to 30 days
+```
+
+### Consuming events externally
+
+Because `events.jsonl` is a plain append-only file, any external process can watch it:
+
+```bash
+# tail live events
+tail -f ~/.claimd/projects/backend/events.jsonl | jq .
+
+# filter by event type
+grep '"event":"claimed"' ~/.claimd/projects/backend/events.jsonl | jq .task.claimed_by
+
+# ship to S3 / a local aggregator — just read new lines and POST them
+```
+
+The file is never locked during reads; `append_event` uses `O_APPEND` which is atomic for small writes on POSIX systems.
 
 ## Dependencies
 

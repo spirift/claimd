@@ -2,10 +2,10 @@ use chrono::Utc;
 use uuid::Uuid;
 
 use crate::error::{Error, Result};
+use crate::event::{EventRecord, EventType};
 use crate::model::{ProjectMeta, Status, TaskItem, TaskList};
 use crate::store::Store;
 
-/// Find item by UUID prefix (minimum 4 chars). Returns mutable reference.
 fn find_by_prefix_mut<'a>(items: &'a mut [TaskItem], prefix: &str) -> Result<&'a mut TaskItem> {
     let matches: Vec<usize> = items
         .iter()
@@ -24,7 +24,6 @@ fn find_by_prefix_mut<'a>(items: &'a mut [TaskItem], prefix: &str) -> Result<&'a
     }
 }
 
-/// Find item by UUID prefix. Returns immutable reference.
 fn find_by_prefix<'a>(items: &'a [TaskItem], prefix: &str) -> Result<&'a TaskItem> {
     let matches: Vec<usize> = items
         .iter()
@@ -43,7 +42,6 @@ fn find_by_prefix<'a>(items: &'a [TaskItem], prefix: &str) -> Result<&'a TaskIte
     }
 }
 
-/// Find index by UUID prefix.
 fn find_index_by_prefix(items: &[TaskItem], prefix: &str) -> Result<usize> {
     let matches: Vec<usize> = items
         .iter()
@@ -66,7 +64,6 @@ pub fn init(store: &Store) -> Result<()> {
     store.init()
 }
 
-/// Resolve a list of UUID prefixes to full UUIDs against the current list.
 fn resolve_prefixes(items: &[TaskItem], prefixes: &[String]) -> Result<Vec<Uuid>> {
     prefixes
         .iter()
@@ -84,7 +81,7 @@ pub fn add(
     source: Option<&str>,
     author: Option<&str>,
     dep_prefixes: &[String],
-) -> Result<TaskItem> {
+) -> Result<(TaskItem, EventRecord)> {
     store.with_lock(|list| {
         let deps = resolve_prefixes(&list.items, dep_prefixes)?;
         let item = TaskItem::new(
@@ -99,7 +96,8 @@ pub fn add(
         );
         let result = item.clone();
         list.items.push(item);
-        Ok(result)
+        let event = EventRecord::new(EventType::Created, None, None, result.clone());
+        Ok((result, event))
     })
 }
 
@@ -142,7 +140,6 @@ pub fn show(store: &Store, id_prefix: &str) -> Result<TaskItem> {
     })
 }
 
-/// Move the current claimed_by to previously_claimed_by if present.
 fn rotate_claimed_by(item: &mut TaskItem, new_agent: Option<&str>) {
     if let Some(prev) = item.claimed_by.take() {
         if !item.previously_claimed_by.contains(&prev) {
@@ -152,7 +149,7 @@ fn rotate_claimed_by(item: &mut TaskItem, new_agent: Option<&str>) {
     item.claimed_by = new_agent.map(String::from);
 }
 
-pub fn claim(store: &Store, id_prefix: &str, agent: Option<&str>) -> Result<TaskItem> {
+pub fn claim(store: &Store, id_prefix: &str, agent: Option<&str>) -> Result<(TaskItem, EventRecord)> {
     let meta = store.read_project_meta()?;
     store.with_try_lock(|list| {
         let item = find_by_prefix_mut(&mut list.items, id_prefix)?;
@@ -167,19 +164,25 @@ pub fn claim(store: &Store, id_prefix: &str, agent: Option<&str>) -> Result<Task
                         pending: item.depends_on.clone(),
                     });
                 }
+                let from = item.status.clone();
                 item.status = Status::InProgress;
                 rotate_claimed_by(item, agent);
                 item.updated_at = Utc::now();
-                Ok(item.clone())
+                let result = item.clone();
+                let event = EventRecord::new(EventType::Claimed, Some(from), Some(Status::InProgress), result.clone());
+                Ok((result, event))
             }
             Status::PrChangesRequested => {
                 if !meta.active {
                     return Err(Error::ProjectInactive);
                 }
+                let from = item.status.clone();
                 item.status = Status::InProgress;
                 rotate_claimed_by(item, agent);
                 item.updated_at = Utc::now();
-                Ok(item.clone())
+                let result = item.clone();
+                let event = EventRecord::new(EventType::Claimed, Some(from), Some(Status::InProgress), result.clone());
+                Ok((result, event))
             }
             Status::InProgress => Err(Error::AlreadyClaimed {
                 id: item.id,
@@ -194,15 +197,16 @@ pub fn claim(store: &Store, id_prefix: &str, agent: Option<&str>) -> Result<Task
     })
 }
 
-pub fn claim_multi(store: &Store, id_prefixes: &[String], agent: Option<&str>) -> Result<Vec<TaskItem>> {
+pub fn claim_multi(store: &Store, id_prefixes: &[String], agent: Option<&str>) -> Result<(Vec<TaskItem>, Vec<EventRecord>)> {
     let meta = store.read_project_meta()?;
     store.with_try_lock(|list| {
-        // First pass: validate all items are claimable
         let indices: Vec<usize> = id_prefixes
             .iter()
             .map(|p| find_index_by_prefix(&list.items, p))
             .collect::<Result<Vec<_>>>()?;
 
+        // First pass: validate all and capture from-statuses
+        let mut from_statuses = Vec::with_capacity(indices.len());
         for &idx in &indices {
             let item = &list.items[idx];
             match item.status {
@@ -236,23 +240,28 @@ pub fn claim_multi(store: &Store, id_prefixes: &[String], agent: Option<&str>) -
                     });
                 }
             }
+            from_statuses.push(item.status.clone());
         }
 
         // Second pass: mutate all
         let now = Utc::now();
         let mut claimed = Vec::with_capacity(indices.len());
-        for &idx in &indices {
+        let mut events = Vec::with_capacity(indices.len());
+        for (i, &idx) in indices.iter().enumerate() {
             let item = &mut list.items[idx];
+            let from = from_statuses[i].clone();
             item.status = Status::InProgress;
             rotate_claimed_by(item, agent);
             item.updated_at = now;
-            claimed.push(item.clone());
+            let result = item.clone();
+            events.push(EventRecord::new(EventType::Claimed, Some(from), Some(Status::InProgress), result.clone()));
+            claimed.push(result);
         }
-        Ok(claimed)
+        Ok((claimed, events))
     })
 }
 
-pub fn pr_open(store: &Store, id_prefix: &str, pr_url: &str) -> Result<TaskItem> {
+pub fn pr_open(store: &Store, id_prefix: &str, pr_url: &str) -> Result<(TaskItem, EventRecord)> {
     store.with_lock(|list| {
         let item = find_by_prefix_mut(&mut list.items, id_prefix)?;
         if item.status != Status::InProgress && item.status != Status::PrChangesRequested {
@@ -262,14 +271,17 @@ pub fn pr_open(store: &Store, id_prefix: &str, pr_url: &str) -> Result<TaskItem>
                 to: Status::PrOpen,
             });
         }
+        let from = item.status.clone();
         item.status = Status::PrOpen;
         item.pr_url = Some(pr_url.to_string());
         item.updated_at = Utc::now();
-        Ok(item.clone())
+        let result = item.clone();
+        let event = EventRecord::new(EventType::PrOpened, Some(from), Some(Status::PrOpen), result.clone());
+        Ok((result, event))
     })
 }
 
-pub fn pr_changes_requested(store: &Store, id_prefix: &str) -> Result<TaskItem> {
+pub fn pr_changes_requested(store: &Store, id_prefix: &str) -> Result<(TaskItem, EventRecord)> {
     store.with_lock(|list| {
         let item = find_by_prefix_mut(&mut list.items, id_prefix)?;
         if item.status != Status::PrOpen {
@@ -279,16 +291,20 @@ pub fn pr_changes_requested(store: &Store, id_prefix: &str) -> Result<TaskItem> 
                 to: Status::PrChangesRequested,
             });
         }
+        let from = item.status.clone();
         item.status = Status::PrChangesRequested;
         item.updated_at = Utc::now();
-        Ok(item.clone())
+        let result = item.clone();
+        let event = EventRecord::new(EventType::PrChangesRequested, Some(from), Some(Status::PrChangesRequested), result.clone());
+        Ok((result, event))
     })
 }
 
-pub fn done(store: &Store, id_prefix: &str) -> Result<TaskItem> {
+pub fn done(store: &Store, id_prefix: &str) -> Result<(TaskItem, EventRecord)> {
     store.with_lock(|list| {
         let idx = find_index_by_prefix(&list.items, id_prefix)?;
         let now = Utc::now();
+        let from = list.items[idx].status.clone();
         list.items[idx].status = Status::Done;
         list.items[idx].claimed_by = None;
         list.items[idx].updated_at = now;
@@ -304,13 +320,15 @@ pub fn done(store: &Store, id_prefix: &str) -> Result<TaskItem> {
             }
         }
 
-        Ok(result)
+        let event = EventRecord::new(EventType::Done, Some(from), Some(Status::Done), result.clone());
+        Ok((result, event))
     })
 }
 
-pub fn incomplete(store: &Store, id_prefix: &str, reason: Option<&str>) -> Result<TaskItem> {
+pub fn incomplete(store: &Store, id_prefix: &str, reason: Option<&str>) -> Result<(TaskItem, EventRecord)> {
     store.with_lock(|list| {
         let item = find_by_prefix_mut(&mut list.items, id_prefix)?;
+        let from = item.status.clone();
         item.status = Status::Incomplete;
         item.claimed_by = None;
         if let Some(r) = reason {
@@ -321,19 +339,24 @@ pub fn incomplete(store: &Store, id_prefix: &str, reason: Option<&str>) -> Resul
             desc.push_str(&format!("[incomplete] {r}"));
         }
         item.updated_at = Utc::now();
-        Ok(item.clone())
+        let result = item.clone();
+        let event = EventRecord::new(EventType::Incomplete, Some(from), Some(Status::Incomplete), result.clone());
+        Ok((result, event))
     })
 }
 
-pub fn unclaim(store: &Store, id_prefix: &str) -> Result<TaskItem> {
+pub fn unclaim(store: &Store, id_prefix: &str) -> Result<(TaskItem, EventRecord)> {
     store.with_lock(|list| {
         let item = find_by_prefix_mut(&mut list.items, id_prefix)?;
         match item.status {
             Status::InProgress | Status::Incomplete => {
+                let from = item.status.clone();
                 item.status = Status::New;
                 item.claimed_by = None;
                 item.updated_at = Utc::now();
-                Ok(item.clone())
+                let result = item.clone();
+                let event = EventRecord::new(EventType::Unclaimed, Some(from), Some(Status::New), result.clone());
+                Ok((result, event))
             }
             _ => Err(Error::InvalidTransition {
                 id: item.id,
@@ -356,9 +379,8 @@ pub fn edit(
     author: Option<&str>,
     add_dep_prefixes: &[String],
     remove_dep_prefixes: &[String],
-) -> Result<TaskItem> {
+) -> Result<(TaskItem, EventRecord)> {
     store.with_lock(|list| {
-        // Resolve dep prefixes before borrowing mutably
         let add_deps = resolve_prefixes(&list.items, add_dep_prefixes)?;
         let remove_deps = resolve_prefixes(&list.items, remove_dep_prefixes)?;
 
@@ -380,25 +402,30 @@ pub fn edit(
             item.depends_on_completed.retain(|id| id != dep);
         }
         item.updated_at = Utc::now();
-        Ok(item.clone())
+        let result = item.clone();
+        let event = EventRecord::new(EventType::Edited, None, None, result.clone());
+        Ok((result, event))
     })
 }
 
-pub fn reorder(store: &Store, id_prefix: &str, position: usize) -> Result<TaskItem> {
+pub fn reorder(store: &Store, id_prefix: &str, position: usize) -> Result<(TaskItem, EventRecord)> {
     store.with_lock(|list| {
         let idx = find_index_by_prefix(&list.items, id_prefix)?;
         let item = list.items.remove(idx);
         let pos = position.min(list.items.len());
         list.items.insert(pos, item);
-        Ok(list.items[pos].clone())
+        let result = list.items[pos].clone();
+        let event = EventRecord::new(EventType::Reordered, None, None, result.clone());
+        Ok((result, event))
     })
 }
 
-pub fn remove(store: &Store, id_prefix: &str) -> Result<TaskItem> {
+pub fn remove(store: &Store, id_prefix: &str) -> Result<(TaskItem, EventRecord)> {
     store.with_lock(|list| {
         let idx = find_index_by_prefix(&list.items, id_prefix)?;
         let item = list.items.remove(idx);
-        Ok(item)
+        let event = EventRecord::new(EventType::Removed, Some(item.status.clone()), None, item.clone());
+        Ok((item, event))
     })
 }
 
@@ -409,6 +436,14 @@ pub fn project_get_meta(store: &Store) -> Result<ProjectMeta> {
 pub fn project_set_active(store: &Store, active: bool) -> Result<ProjectMeta> {
     let mut meta = store.read_project_meta()?;
     meta.active = active;
+    store.write_project_meta(&meta)?;
+    Ok(meta)
+}
+
+pub fn project_set_events(store: &Store, enabled: Option<bool>, ttl_days: Option<u32>) -> Result<ProjectMeta> {
+    let mut meta = store.read_project_meta()?;
+    if let Some(e) = enabled { meta.events_enabled = e; }
+    if let Some(t) = ttl_days { meta.events_ttl_days = t; }
     store.write_project_meta(&meta)?;
     Ok(meta)
 }
@@ -426,7 +461,7 @@ mod tests {
     }
 
     fn add_task(store: &Store, title: &str) -> TaskItem {
-        add(store, title, None, 5, &[], None, None, None, &[]).unwrap()
+        add(store, title, None, 5, &[], None, None, None, &[]).unwrap().0
     }
 
     // --- add / list / show ---
@@ -434,12 +469,14 @@ mod tests {
     #[test]
     fn add_creates_new_task() {
         let (_dir, store) = setup();
-        let item = add(&store, "hello", Some("desc"), 2, &["tag1".into()], None, None, None, &[]).unwrap();
+        let (item, event) = add(&store, "hello", Some("desc"), 2, &["tag1".into()], None, None, None, &[]).unwrap();
         assert_eq!(item.title, "hello");
         assert_eq!(item.description.as_deref(), Some("desc"));
         assert_eq!(item.priority, 2);
         assert_eq!(item.tags, vec!["tag1"]);
         assert_eq!(item.status, Status::New);
+        assert!(matches!(event.event, EventType::Created));
+        assert!(event.from.is_none());
     }
 
     #[test]
@@ -504,9 +541,12 @@ mod tests {
     fn claim_new_to_in_progress() {
         let (_dir, store) = setup();
         let item = add_task(&store, "task");
-        let claimed = claim(&store, &item.short_id(), Some("agent-1")).unwrap();
+        let (claimed, event) = claim(&store, &item.short_id(), Some("agent-1")).unwrap();
         assert_eq!(claimed.status, Status::InProgress);
         assert_eq!(claimed.claimed_by.as_deref(), Some("agent-1"));
+        assert!(matches!(event.event, EventType::Claimed));
+        assert!(matches!(event.from, Some(Status::New)));
+        assert!(matches!(event.to, Some(Status::InProgress)));
     }
 
     #[test]
@@ -531,7 +571,7 @@ mod tests {
     fn claim_with_pending_deps_fails() {
         let (_dir, store) = setup();
         let dep = add_task(&store, "dep");
-        let task = add(&store, "task", None, 5, &[], None, None, None, &[dep.short_id()]).unwrap();
+        let task = add(&store, "task", None, 5, &[], None, None, None, &[dep.short_id()]).unwrap().0;
         let err = claim(&store, &task.short_id(), None).unwrap_err();
         assert!(matches!(err, Error::HasPendingDeps { .. }));
     }
@@ -552,7 +592,7 @@ mod tests {
         claim(&store, &item.short_id(), Some("agent-1")).unwrap();
         pr_open(&store, &item.short_id(), "https://example.com/pr/1").unwrap();
         pr_changes_requested(&store, &item.short_id()).unwrap();
-        let reclaimed = claim(&store, &item.short_id(), Some("agent-2")).unwrap();
+        let (reclaimed, _) = claim(&store, &item.short_id(), Some("agent-2")).unwrap();
         assert_eq!(reclaimed.status, Status::InProgress);
         assert_eq!(reclaimed.claimed_by.as_deref(), Some("agent-2"));
         assert!(reclaimed.previously_claimed_by.contains(&"agent-1".to_string()));
@@ -565,16 +605,18 @@ mod tests {
         let (_dir, store) = setup();
         let item = add_task(&store, "task");
         claim(&store, &item.short_id(), Some("agent-1")).unwrap();
-        let finished = done(&store, &item.short_id()).unwrap();
+        let (finished, event) = done(&store, &item.short_id()).unwrap();
         assert_eq!(finished.status, Status::Done);
         assert!(finished.claimed_by.is_none());
+        assert!(matches!(event.event, EventType::Done));
+        assert!(matches!(event.from, Some(Status::InProgress)));
     }
 
     #[test]
     fn done_propagates_to_dependents() {
         let (_dir, store) = setup();
         let dep = add_task(&store, "dep");
-        let task = add(&store, "task", None, 5, &[], None, None, None, &[dep.short_id()]).unwrap();
+        let task = add(&store, "task", None, 5, &[], None, None, None, &[dep.short_id()]).unwrap().0;
         done(&store, &dep.short_id()).unwrap();
         let updated = show(&store, &task.short_id()).unwrap();
         assert!(updated.depends_on.is_empty());
@@ -585,20 +627,21 @@ mod tests {
     fn done_dep_unblocks_claim() {
         let (_dir, store) = setup();
         let dep = add_task(&store, "dep");
-        let task = add(&store, "task", None, 5, &[], None, None, None, &[dep.short_id()]).unwrap();
+        let task = add(&store, "task", None, 5, &[], None, None, None, &[dep.short_id()]).unwrap().0;
         done(&store, &dep.short_id()).unwrap();
-        let claimed = claim(&store, &task.short_id(), None).unwrap();
+        let (claimed, _) = claim(&store, &task.short_id(), None).unwrap();
         assert_eq!(claimed.status, Status::InProgress);
     }
 
     #[test]
     fn incomplete_appends_reason() {
         let (_dir, store) = setup();
-        let item = add(&store, "task", Some("original"), 5, &[], None, None, None, &[]).unwrap();
+        let item = add(&store, "task", Some("original"), 5, &[], None, None, None, &[]).unwrap().0;
         claim(&store, &item.short_id(), None).unwrap();
-        let result = incomplete(&store, &item.short_id(), Some("blocked")).unwrap();
+        let (result, event) = incomplete(&store, &item.short_id(), Some("blocked")).unwrap();
         assert_eq!(result.status, Status::Incomplete);
         assert!(result.description.unwrap().contains("[incomplete] blocked"));
+        assert!(matches!(event.event, EventType::Incomplete));
     }
 
     #[test]
@@ -606,9 +649,11 @@ mod tests {
         let (_dir, store) = setup();
         let item = add_task(&store, "task");
         claim(&store, &item.short_id(), Some("agent-1")).unwrap();
-        let reset = unclaim(&store, &item.short_id()).unwrap();
+        let (reset, event) = unclaim(&store, &item.short_id()).unwrap();
         assert_eq!(reset.status, Status::New);
         assert!(reset.claimed_by.is_none());
+        assert!(matches!(event.event, EventType::Unclaimed));
+        assert!(matches!(event.from, Some(Status::InProgress)));
     }
 
     #[test]
@@ -626,7 +671,7 @@ mod tests {
         let item = add_task(&store, "task");
         claim(&store, &item.short_id(), None).unwrap();
         incomplete(&store, &item.short_id(), None).unwrap();
-        let reset = unclaim(&store, &item.short_id()).unwrap();
+        let (reset, _) = unclaim(&store, &item.short_id()).unwrap();
         assert_eq!(reset.status, Status::New);
     }
 
@@ -637,9 +682,10 @@ mod tests {
         let (_dir, store) = setup();
         let item = add_task(&store, "task");
         claim(&store, &item.short_id(), None).unwrap();
-        let result = pr_open(&store, &item.short_id(), "https://github.com/org/repo/pull/1").unwrap();
+        let (result, event) = pr_open(&store, &item.short_id(), "https://github.com/org/repo/pull/1").unwrap();
         assert_eq!(result.status, Status::PrOpen);
         assert_eq!(result.pr_url.as_deref(), Some("https://github.com/org/repo/pull/1"));
+        assert!(matches!(event.event, EventType::PrOpened));
     }
 
     #[test]
@@ -648,8 +694,9 @@ mod tests {
         let item = add_task(&store, "task");
         claim(&store, &item.short_id(), None).unwrap();
         pr_open(&store, &item.short_id(), "https://example.com").unwrap();
-        let result = pr_changes_requested(&store, &item.short_id()).unwrap();
+        let (result, event) = pr_changes_requested(&store, &item.short_id()).unwrap();
         assert_eq!(result.status, Status::PrChangesRequested);
+        assert!(matches!(event.event, EventType::PrChangesRequested));
     }
 
     #[test]
@@ -669,9 +716,10 @@ mod tests {
         let a = add_task(&store, "a");
         let b = add_task(&store, "b");
         let ids = vec![a.short_id(), b.short_id()];
-        let claimed = claim_multi(&store, &ids, Some("agent-1")).unwrap();
+        let (claimed, events) = claim_multi(&store, &ids, Some("agent-1")).unwrap();
         assert_eq!(claimed.len(), 2);
         assert!(claimed.iter().all(|t| t.status == Status::InProgress));
+        assert_eq!(events.len(), 2);
     }
 
     #[test]
@@ -683,7 +731,6 @@ mod tests {
         let ids = vec![a.short_id(), b.short_id()];
         let err = claim_multi(&store, &ids, Some("agent-2")).unwrap_err();
         assert!(matches!(err, Error::AlreadyClaimed { .. }));
-        // a should still be New since the whole operation failed
         let a_state = show(&store, &a.short_id()).unwrap();
         assert_eq!(a_state.status, Status::New);
     }
@@ -694,7 +741,7 @@ mod tests {
     fn edit_updates_fields() {
         let (_dir, store) = setup();
         let item = add_task(&store, "original");
-        let updated = edit(
+        let (updated, event) = edit(
             &store, &item.short_id(),
             Some("updated"), Some("new desc"), Some(1),
             Some(&["newtag".to_string()]),
@@ -704,6 +751,7 @@ mod tests {
         assert_eq!(updated.description.as_deref(), Some("new desc"));
         assert_eq!(updated.priority, 1);
         assert_eq!(updated.tags, vec!["newtag"]);
+        assert!(matches!(event.event, EventType::Edited));
     }
 
     #[test]
@@ -740,8 +788,63 @@ mod tests {
     fn remove_deletes_task() {
         let (_dir, store) = setup();
         let item = add_task(&store, "task");
-        remove(&store, &item.short_id()).unwrap();
+        let (removed, event) = remove(&store, &item.short_id()).unwrap();
+        assert_eq!(removed.id, item.id);
+        assert!(matches!(event.event, EventType::Removed));
         let err = show(&store, &item.short_id()).unwrap_err();
         assert!(matches!(err, Error::NotFound { .. }));
+    }
+
+    // --- events ---
+
+    #[test]
+    fn append_event_writes_to_jsonl() {
+        let (_dir, store) = setup();
+        let item = add_task(&store, "task");
+        let (_, event) = claim(&store, &item.short_id(), Some("agent-1")).unwrap();
+        store.append_event(&event);
+        let events = store.read_events().unwrap();
+        assert_eq!(events.len(), 1);
+        assert!(matches!(events[0].event, EventType::Claimed));
+    }
+
+    #[test]
+    fn events_disabled_suppresses_writes() {
+        let (_dir, store) = setup();
+        let mut meta = store.read_project_meta().unwrap();
+        meta.events_enabled = false;
+        store.write_project_meta(&meta).unwrap();
+        let item = add_task(&store, "task");
+        let (_, event) = claim(&store, &item.short_id(), None).unwrap();
+        store.append_event(&event);
+        let events = store.read_events().unwrap();
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn prune_events_removes_old() {
+        use chrono::Duration;
+        let (_dir, store) = setup();
+        let item = add_task(&store, "task");
+        let (_, mut event) = claim(&store, &item.short_id(), None).unwrap();
+        // backdate event to 10 days ago
+        event.ts = Utc::now() - Duration::days(10);
+        store.append_event(&event);
+        let pruned = store.prune_events(7).unwrap();
+        assert_eq!(pruned, 1);
+        let events = store.read_events().unwrap();
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn prune_events_keeps_recent() {
+        let (_dir, store) = setup();
+        let item = add_task(&store, "task");
+        let (_, event) = claim(&store, &item.short_id(), None).unwrap();
+        store.append_event(&event);
+        let pruned = store.prune_events(7).unwrap();
+        assert_eq!(pruned, 0);
+        let events = store.read_events().unwrap();
+        assert_eq!(events.len(), 1);
     }
 }

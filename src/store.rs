@@ -1,9 +1,12 @@
 use std::fs::{self, File, OpenOptions};
+use std::io::Write;
 use std::path::PathBuf;
 
+use chrono::Utc;
 use fs2::FileExt;
 
 use crate::error::{Error, Result};
+use crate::event::EventRecord;
 use crate::model::{ProjectMeta, TaskList};
 
 pub struct Store {
@@ -29,6 +32,10 @@ impl Store {
 
     fn project_meta_path(&self) -> PathBuf {
         self.dir.join("project.json")
+    }
+
+    pub fn events_path(&self) -> PathBuf {
+        self.dir.join("events.jsonl")
     }
 
     pub fn init(&self) -> Result<()> {
@@ -139,5 +146,76 @@ impl Store {
         let bytes = serde_json::to_vec_pretty(meta)?;
         fs::write(self.project_meta_path(), &bytes)?;
         Ok(())
+    }
+
+    /// Append an event to events.jsonl. Best-effort: logs to stderr on failure.
+    pub fn append_event(&self, event: &EventRecord) {
+        let meta = self.read_project_meta().unwrap_or_default();
+        if !meta.events_enabled {
+            return;
+        }
+        let line = match serde_json::to_string(event) {
+            Ok(s) => s,
+            Err(e) => { eprintln!("claimd: event serialize error: {e}"); return; }
+        };
+        let result = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(self.events_path())
+            .and_then(|mut f| writeln!(f, "{line}"));
+        if let Err(e) = result {
+            eprintln!("claimd: event write error: {e}");
+        }
+    }
+
+    /// Read all events from events.jsonl. Skips malformed lines.
+    pub fn read_events(&self) -> Result<Vec<EventRecord>> {
+        let path = self.events_path();
+        if !path.exists() {
+            return Ok(Vec::new());
+        }
+        let content = fs::read_to_string(&path)?;
+        let events = content
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .filter_map(|l| match serde_json::from_str::<EventRecord>(l) {
+                Ok(e) => Some(e),
+                Err(e) => { eprintln!("claimd: skipping malformed event: {e}"); None }
+            })
+            .collect();
+        Ok(events)
+    }
+
+    /// Remove events older than `ttl_days`. Returns count pruned. Atomic via tmp+rename.
+    pub fn prune_events(&self, ttl_days: u32) -> Result<usize> {
+        let path = self.events_path();
+        if !path.exists() {
+            return Ok(0);
+        }
+        let cutoff = Utc::now() - chrono::Duration::days(i64::from(ttl_days));
+        let content = fs::read_to_string(&path)?;
+        let lines: Vec<&str> = content.lines().filter(|l| !l.trim().is_empty()).collect();
+        let total = lines.len();
+        let kept: Vec<&str> = lines
+            .iter()
+            .filter(|l| {
+                serde_json::from_str::<EventRecord>(l)
+                    .map(|e| e.ts >= cutoff)
+                    .unwrap_or(true)
+            })
+            .copied()
+            .collect();
+        let pruned = total - kept.len();
+        if pruned > 0 {
+            let tmp = self.dir.join("events.jsonl.tmp");
+            let mut out = String::with_capacity(content.len());
+            for line in &kept {
+                out.push_str(line);
+                out.push('\n');
+            }
+            fs::write(&tmp, out.as_bytes())?;
+            fs::rename(&tmp, &path)?;
+        }
+        Ok(pruned)
     }
 }
